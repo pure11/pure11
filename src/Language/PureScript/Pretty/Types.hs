@@ -14,13 +14,15 @@
 -----------------------------------------------------------------------------
 
 module Language.PureScript.Pretty.Types (
+    typeAsBox,
     prettyPrintType,
+    typeAtomAsBox,
     prettyPrintTypeAtom,
+    prettyPrintRowWith,
     prettyPrintRow
 ) where
 
 import Data.Maybe (fromMaybe)
-import Data.List (intercalate)
 
 import Control.Arrow ((<+>))
 import Control.PatternArrows
@@ -32,35 +34,52 @@ import Language.PureScript.Pretty.Common
 import Language.PureScript.Pretty.Kinds
 import Language.PureScript.Environment
 
-typeLiterals :: Pattern () Type String
+import Text.PrettyPrint.Boxes hiding ((<+>))
+
+hsepWith :: Box -> [Box] -> Box
+hsepWith _ []       = nullBox
+hsepWith _ [x]      = x
+hsepWith sep (x:xs) = x <> sep <> hsepWith sep xs
+
+typeLiterals :: Pattern () Type Box
 typeLiterals = mkPattern match
   where
-  match TypeWildcard = Just "_"
-  match (TypeVar var) = Just var
-  match (PrettyPrintObject row) = Just $ "{ " ++ prettyPrintRow row ++ " }"
-  match (TypeConstructor ctor) = Just $ showQualified runProperName ctor
-  match (TUnknown u) = Just $ '_' : show u
-  match (Skolem name s _) = Just $ name ++ show s
-  match (ConstrainedType deps ty) = Just $ "(" ++ intercalate ", " (map (\(pn, ty') -> showQualified runProperName pn ++ " " ++ unwords (map prettyPrintTypeAtom ty')) deps) ++ ") => " ++ prettyPrintType ty
-  match (SaturatedTypeSynonym name args) = Just $ showQualified runProperName name ++ "<" ++ intercalate "," (map prettyPrintTypeAtom args) ++ ">"
-  match REmpty = Just "()"
-  match row@RCons{} = Just $ '(' : prettyPrintRow row ++ ")"
+  match TypeWildcard = Just $ text "_"
+  match (TypeVar var) = Just $ text var
+  match (PrettyPrintObject row) = Just $ prettyPrintRowWith '{' '}' row
+  match (TypeConstructor ctor) = Just $ text $ showQualified runProperName ctor
+  match (TUnknown u) = Just $ text $ '_' : show u
+  match (Skolem name s _) = Just $ text $ name ++ show s
+  match (ConstrainedType deps ty) = Just $ text "(" <> hsepWith (text ", ") (map (\(pn, ty') -> hsep 1 left (text (showQualified runProperName pn) : map typeAtomAsBox ty')) deps) <> text ") => " <> typeAsBox ty
+  match REmpty = Just $ text "()"
+  match row@RCons{} = Just $ prettyPrintRowWith '(' ')' row
   match _ = Nothing
 
 -- |
 -- Generate a pretty-printed string representing a Row
 --
-prettyPrintRow :: Type -> String
-prettyPrintRow = (\(tys, rest) -> intercalate ", " (map (uncurry nameAndTypeToPs) tys) ++ tailToPs rest) . toList []
+prettyPrintRowWith :: Char -> Char -> Type -> Box
+prettyPrintRowWith open close = uncurry listToBox . toList []
   where
-  nameAndTypeToPs :: String -> Type -> String
-  nameAndTypeToPs name ty = prettyPrintObjectKey name ++ " :: " ++ prettyPrintType ty
-  tailToPs :: Type -> String
-  tailToPs REmpty = ""
-  tailToPs other = " | " ++ prettyPrintType other
+  nameAndTypeToPs :: Char -> String -> Type -> Box
+  nameAndTypeToPs start name ty = text (start : ' ' : prettyPrintObjectKey name ++ " :: ") <> typeAsBox ty
+
+  tailToPs :: Type -> Box
+  tailToPs REmpty = nullBox
+  tailToPs other = text "| " <> typeAsBox other
+
+  listToBox :: [(String, Type)] -> Type -> Box
+  listToBox []  REmpty = text [open, close]
+  listToBox tys rest = vcat left $
+    zipWith (\(nm, ty) i -> nameAndTypeToPs (if i == 0 then open else ',') nm ty) tys [0 :: Int ..] ++
+    [ tailToPs rest, text [close] ]
+
   toList :: [(String, Type)] -> Type -> ([(String, Type)], Type)
   toList tys (RCons name ty row) = toList ((name, ty):tys) row
   toList tys r = (tys, r)
+
+prettyPrintRow :: Type -> String
+prettyPrintRow = render . prettyPrintRowWith '(' ')'
 
 typeApp :: Pattern () Type (Type, Type)
 typeApp = mkPattern match
@@ -92,19 +111,19 @@ insertPlaceholders = everywhereOnTypesTopDown convertForAlls . everywhereOnTypes
     go idents other = PrettyPrintForAll idents other
   convertForAlls other = other
 
-matchTypeAtom :: Pattern () Type String
-matchTypeAtom = typeLiterals <+> fmap parens matchType
+matchTypeAtom :: Pattern () Type Box
+matchTypeAtom = typeLiterals <+> fmap ((text "(" <>) . (<> text ")")) matchType
 
-matchType :: Pattern () Type String
+matchType :: Pattern () Type Box
 matchType = buildPrettyPrinter operators matchTypeAtom
   where
-  operators :: OperatorTable () Type String
+  operators :: OperatorTable () Type Box
   operators =
-    OperatorTable [ [ AssocL typeApp $ \f x -> f ++ " " ++ x ]
-                  , [ AssocR appliedFunction $ \arg ret -> arg ++ " -> " ++ ret
+    OperatorTable [ [ AssocL typeApp $ \f x -> f <> x ]
+                  , [ AssocR appliedFunction $ \arg ret -> arg <> text " -> " <> ret
                     ]
-                  , [ Wrap forall_ $ \idents ty -> "forall " ++ unwords idents ++ ". " ++ ty ]
-                  , [ Wrap kinded $ \k ty -> ty ++ " :: " ++ prettyPrintKind k ]
+                  , [ Wrap forall_ $ \idents ty -> text "forall " <> text (unwords idents) <> text ". " <> ty ]
+                  , [ Wrap kinded $ \k ty -> ty <> text " :: " <> kindAsBox k ]
                   ]
 
 forall_ :: Pattern () Type ([String], Type)
@@ -113,15 +132,16 @@ forall_ = mkPattern match
   match (PrettyPrintForAll idents ty) = Just (idents, ty)
   match _ = Nothing
 
--- |
--- Generate a pretty-printed string representing a Type, as it should appear inside parentheses
---
+typeAtomAsBox :: Type -> Box
+typeAtomAsBox = fromMaybe (error "Incomplete pattern") . pattern matchTypeAtom () . insertPlaceholders
+
+-- | Generate a pretty-printed string representing a Type, as it should appear inside parentheses
 prettyPrintTypeAtom :: Type -> String
-prettyPrintTypeAtom = fromMaybe (error "Incomplete pattern") . pattern matchTypeAtom () . insertPlaceholders
+prettyPrintTypeAtom = render . typeAtomAsBox
 
+typeAsBox :: Type -> Box
+typeAsBox = fromMaybe (error "Incomplete pattern") . pattern matchType () . insertPlaceholders
 
--- |
--- Generate a pretty-printed string representing a Type
---
+-- | Generate a pretty-printed string representing a Type
 prettyPrintType :: Type -> String
-prettyPrintType = fromMaybe (error "Incomplete pattern") . pattern matchType () . insertPlaceholders
+prettyPrintType = render . typeAsBox

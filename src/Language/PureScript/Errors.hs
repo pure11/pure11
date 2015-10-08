@@ -461,11 +461,11 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
       line "Overlapping names in let binding."
     goSimple (InfiniteType ty) =
       paras [ line "An infinite type was inferred for an expression: "
-            , indent $ line $ prettyPrintType ty
+            , indent $ typeAsBox ty
             ]
     goSimple (InfiniteKind ki) =
       paras [ line "An infinite kind was inferred for a type: "
-            , indent $ line $ prettyPrintKind ki
+            , indent $ kindAsBox ki
             ]
     goSimple (MultipleFixities name) =
       line $ "Multiple fixity declarations for " ++ showIdent name
@@ -551,21 +551,21 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
                                           ]) binding
     goSimple (TypesDoNotUnify t1 t2)
       = paras [ line "Cannot unify type"
-              , indent $ line $ prettyPrintType t1
+              , indent $ typeAsBox t1
               , line "with type"
-              , indent $ line $ prettyPrintType t2
+              , indent $ typeAsBox t2
               ]
     goSimple (KindsDoNotUnify k1 k2) =
       paras [ line "Cannot unify kind"
-            , indent $ line $ prettyPrintKind k1
+            , indent $ kindAsBox k1
             , line "with kind"
-            , indent $ line $ prettyPrintKind k2
+            , indent $ kindAsBox k2
             ]
     goSimple (ConstrainedTypeUnified t1 t2) =
       paras [ line "Cannot unify constrained type"
-            , indent $ line $ prettyPrintType t1
+            , indent $ typeAsBox t1
             , line "with type"
-            , indent $ line $ prettyPrintType t2
+            , indent $ typeAsBox t2
             ]
     goSimple (OverlappingInstances nm ts (d : ds)) =
       paras [ line $ "Overlapping instances found for " ++ showQualified runProperName nm ++ " " ++ unwords (map prettyPrintTypeAtom ts) ++ ":"
@@ -608,13 +608,16 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
       paras [ line "Expression"
             , indent $ line $ prettyPrintValue expr
             , line "does not have type"
-            , indent $ line $ prettyPrintType ty
+            , indent $ typeAsBox ty
             ]
     goSimple (PropertyIsMissing prop row) =
-      line $ "Row " ++ prettyPrintRow row ++ " lacks required property " ++ show prop
+      paras [ line "Row"
+            , indent $ prettyPrintRowWith '(' ')' row
+            , line $ "lacks required property " ++ show prop
+            ]
     goSimple (CannotApplyFunction fn arg) =
       paras [ line "Cannot apply function of type"
-            , indent $ line $ prettyPrintType fn
+            , indent $ typeAsBox fn
             , line "to argument"
             , indent $ line $ prettyPrintValue arg
             ]
@@ -629,7 +632,7 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
       line "Newtypes must define a single constructor with a single argument"
     goSimple (InvalidInstanceHead ty) =
       paras [ line "Invalid type in class instance head:"
-            , indent $ line $ prettyPrintType ty
+            , indent $ typeAsBox ty
             ]
     goSimple (TransitiveExportError x ys) =
       paras $ line ("An export for " ++ prettyPrintExport x ++ " requires the following to also be exported: ")
@@ -668,9 +671,9 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             ]
     go (ErrorUnifyingTypes t1 t2 err) =
       paras [ lineWithLevel "unifying type "
-            , indent $ line $ prettyPrintType t1
+            , indent $ typeAsBox t1
             , line "with type"
-            , indent $ line $ prettyPrintType t2
+            , indent $ typeAsBox t2
             , go err
             ]
     go (ErrorInExpression expr err) =
@@ -684,9 +687,9 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             ]
     go (ErrorInSubsumption t1 t2 err) =
       paras [ lineWithLevel "checking that type "
-            , indent $ line $ prettyPrintType t1
+            , indent $ typeAsBox t1
             , line "subsumes type"
-            , indent $ line $ prettyPrintType t2
+            , indent $ typeAsBox t2
             , go err
             ]
     go (ErrorInInstance name ts err) =
@@ -695,7 +698,7 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             ]
     go (ErrorCheckingKind ty err) =
       paras [ lineWithLevel "checking kind of type "
-            , indent $ line $ prettyPrintType ty
+            , indent $ typeAsBox ty
             , go err
             ]
     go (ErrorInferringType expr err) =
@@ -707,14 +710,14 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
       paras [ lineWithLevel "checking that value "
             , indent $ line $ prettyPrintValue expr
             , line "has type"
-            , indent $ line $ prettyPrintType ty
+            , indent $ typeAsBox ty
             , go err
             ]
     go (ErrorInApplication f t a err) =
       paras [ lineWithLevel "applying function"
             , indent $ line $ prettyPrintValue f
             , line "of type"
-            , indent $ line $ prettyPrintType t
+            , indent $ typeAsBox t
             , line "to argument"
             , indent $ line $ prettyPrintValue a
             , go err
