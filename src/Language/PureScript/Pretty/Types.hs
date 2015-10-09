@@ -36,11 +36,6 @@ import Language.PureScript.Environment
 
 import Text.PrettyPrint.Boxes hiding ((<+>))
 
-hsepWith :: Box -> [Box] -> Box
-hsepWith _ []       = nullBox
-hsepWith _ [x]      = x
-hsepWith sep (x:xs) = x <> sep <> hsepWith sep xs
-
 typeLiterals :: Pattern () Type Box
 typeLiterals = mkPattern match
   where
@@ -50,10 +45,20 @@ typeLiterals = mkPattern match
   match (TypeConstructor ctor) = Just $ text $ showQualified runProperName ctor
   match (TUnknown u) = Just $ text $ '_' : show u
   match (Skolem name s _) = Just $ text $ name ++ show s
-  match (ConstrainedType deps ty) = Just $ text "(" <> hsepWith (text ", ") (map (\(pn, ty') -> hsep 1 left (text (showQualified runProperName pn) : map typeAtomAsBox ty')) deps) <> text ") => " <> typeAsBox ty
+  match (ConstrainedType deps ty) = Just $ constraintsAsBox deps `before` (text ") => " <> typeAsBox ty)
   match REmpty = Just $ text "()"
   match row@RCons{} = Just $ prettyPrintRowWith '(' ')' row
   match _ = Nothing
+
+constraintsAsBox :: [(Qualified ProperName, [Type])] -> Box
+constraintsAsBox = vcat left . zipWith (\i (pn, tys) -> text (if i == 0 then "( " else ", ") <> constraintAsBox pn tys) [0 :: Int ..]
+  where
+  constraintAsBox pn tys = hsep 1 left (text (showQualified runProperName pn) : map typeAtomAsBox tys)
+
+-- | Place a box before another, vertically when the first box takes up multiple lines.
+before :: Box -> Box -> Box
+before b1 b2 | rows b1 > 1 = b1 // b2
+            | otherwise = b1 <> b2
 
 -- |
 -- Generate a pretty-printed string representing a Row
@@ -119,11 +124,11 @@ matchType = buildPrettyPrinter operators matchTypeAtom
   where
   operators :: OperatorTable () Type Box
   operators =
-    OperatorTable [ [ AssocL typeApp $ \f x -> f <> x ]
-                  , [ AssocR appliedFunction $ \arg ret -> arg <> text " -> " <> ret
+    OperatorTable [ [ AssocL typeApp $ \f x -> (f <> text " ") `before` x ]
+                  , [ AssocR appliedFunction $ \arg ret -> (arg <> text " ") `before` (text "-> " <> ret)
                     ]
-                  , [ Wrap forall_ $ \idents ty -> text "forall " <> text (unwords idents) <> text ". " <> ty ]
-                  , [ Wrap kinded $ \k ty -> ty <> text " :: " <> kindAsBox k ]
+                  , [ Wrap forall_ $ \idents ty -> text ("forall " ++ unwords idents ++ ". ") <> ty ]
+                  , [ Wrap kinded $ \k ty -> ty `before` (text " :: " <> kindAsBox k) ]
                   ]
 
 forall_ :: Pattern () Type ([String], Type)

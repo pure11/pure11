@@ -568,16 +568,33 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             , indent $ typeAsBox t2
             ]
     goSimple (OverlappingInstances nm ts (d : ds)) =
-      paras [ line $ "Overlapping instances found for " ++ showQualified runProperName nm ++ " " ++ unwords (map prettyPrintTypeAtom ts) ++ ":"
+      paras [ line "Overlapping instances found for"
+            , indent $ Box.hsep 1 Box.left [ line (showQualified runProperName nm)
+                                           , Box.vcat Box.left (map typeAtomAsBox ts)
+                                           ]
+            , line "The following instances were found:"
             , indent $ paras (line (showQualified showIdent d ++ " (chosen)") : map (line . showQualified showIdent) ds)
             ]
     goSimple OverlappingInstances{} = error "OverlappingInstances: empty instance list"
     goSimple (NoInstanceFound nm ts) =
-      line $ "No instance found for " ++ showQualified runProperName nm ++ " " ++ unwords (map prettyPrintTypeAtom ts)
+      paras [ line "No instance found for"
+            , indent $ Box.hsep 1 Box.left [ line (showQualified runProperName nm)
+                                           , Box.vcat Box.left (map typeAtomAsBox ts)
+                                           ]
+            ]
     goSimple (PossiblyInfiniteInstance nm ts) =
-      line $ "Instance for " ++ showQualified runProperName nm ++ " " ++ unwords (map prettyPrintTypeAtom ts) ++ " is possibly infinite."
+      paras [ line "Instance for"
+            , indent $ Box.hsep 1 Box.left [ line (showQualified runProperName nm)
+                                           , Box.vcat Box.left (map typeAtomAsBox ts)
+                                           ]
+            , line "is possibly infinite."
+            ]
     goSimple (CannotDerive nm ts) =
-      line $ "Cannot derive " ++ showQualified runProperName nm ++ " instance for " ++ unwords (map prettyPrintTypeAtom ts)
+      paras [ line "Cannot derive an instance for"
+            , indent $ Box.hsep 1 Box.left [ line (showQualified runProperName nm)
+                                           , Box.vcat Box.left (map typeAtomAsBox ts)
+                                           ]
+            ]
     goSimple (CannotFindDerivingType nm) =
       line $ "Cannot derive instance, because the type declaration for " ++ runProperName nm ++ " could not be found."
     goSimple (DuplicateLabel l expr) =
@@ -599,7 +616,11 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
       line $ "Member " ++ showIdent ident ++ " is not a member of the class being instantiated"
     goSimple (ExpectedType ty kind) =
       paras [ line "In a type-annotated expression x :: t, the type t must have kind *."
-            , line $ "The error arises from the type " ++ prettyPrintType ty ++ " having the kind "  ++ prettyPrintKind kind ++ " instead."
+            , line "The error arises from the type"
+            , indent $ typeAsBox ty
+            , line "having the kind"
+            , indent $ kindAsBox kind
+            , line "instead."
             ]
     goSimple (IncorrectConstructorArity nm) =
       line $ "Wrong number of arguments to constructor " ++ showQualified runProperName nm
@@ -624,7 +645,11 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
     goSimple TypeSynonymInstance =
       line "Type synonym instances are disallowed"
     goSimple (OrphanInstance nm cnm ts) =
-      paras [ line $ "Instance " ++ showIdent nm ++ " for " ++ showQualified runProperName cnm ++ " " ++ unwords (map prettyPrintTypeAtom ts) ++ " is an orphan instance."
+      paras [ line $ "Instance " ++ showIdent nm ++ " for "
+            , indent $ Box.hsep 1 Box.left [ line (showQualified runProperName cnm)
+                                           , Box.vcat Box.left (map typeAtomAsBox ts)
+                                           ]
+            , line "is an orphan instance."
             , line "An orphan instance is an instance which is defined in neither the class module nor the data type module."
             , line "Consider moving the instance, if possible, or using a newtype wrapper."
             ]
@@ -653,7 +678,9 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
     goSimple (ImportHidingModule name) =
       line $ "Attempted to hide module " ++ runModuleName name ++ " in import expression, this is not permitted"
     goSimple (WildcardInferredType ty) =
-      line $ "The wildcard type definition has the inferred type " ++ prettyPrintType ty
+      paras [ line "The wildcard type definition has the inferred type "
+            , indent $ typeAsBox ty
+            ]
     goSimple (NotExhaustivePattern bs b) =
       paras $ [ line "A case expression could not be determined to cover all inputs."
               , line "The following additional cases are required to cover all inputs:\n"
@@ -674,7 +701,7 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             , indent $ typeAsBox t1
             , line "with type"
             , indent $ typeAsBox t2
-            , go err
+            , indent $ go err
             ]
     go (ErrorInExpression expr err) =
       paras [ lineWithLevel "in expression:"
@@ -690,28 +717,31 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             , indent $ typeAsBox t1
             , line "subsumes type"
             , indent $ typeAsBox t2
-            , go err
+            , indent $ go err
             ]
-    go (ErrorInInstance name ts err) =
-      paras [ lineWithLevel $ "in type class instance " ++ showQualified runProperName name ++ " " ++ unwords (map prettyPrintTypeAtom ts) ++ ":"
+    go (ErrorInInstance nm ts err) =
+      paras [ lineWithLevel "in type class instance"
+            , indent $ Box.hsep 1 Box.left [ line (showQualified runProperName nm)
+                                           , Box.vcat Box.left (map typeAtomAsBox ts)
+                                           ]
             , go err
             ]
     go (ErrorCheckingKind ty err) =
       paras [ lineWithLevel "checking kind of type "
             , indent $ typeAsBox ty
-            , go err
+            , indent $ go err
             ]
     go (ErrorInferringType expr err) =
       paras [ lineWithLevel "inferring type of value "
             , indent $ line $ prettyPrintValue expr
-            , go err
+            , indent $ go err
             ]
     go (ErrorCheckingType expr ty err) =
       paras [ lineWithLevel "checking that value "
             , indent $ line $ prettyPrintValue expr
             , line "has type"
             , indent $ typeAsBox ty
-            , go err
+            , indent $ go err
             ]
     go (ErrorInApplication f t a err) =
       paras [ lineWithLevel "applying function"
@@ -720,7 +750,7 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             , indent $ typeAsBox t
             , line "to argument"
             , indent $ line $ prettyPrintValue a
-            , go err
+            , indent $ go err
             ]
     go (ErrorInDataConstructor nm err) =
       paras [ lineWithLevel $ "in data constructor " ++ runProperName nm ++ ":"
@@ -735,7 +765,7 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             , go err
             ]
     go (ErrorInDataBindingGroup err) =
-      paras [ lineWithLevel $ "in data binding group:"
+      paras [ lineWithLevel "in data binding group:"
             , go err
             ]
     go (ErrorInTypeSynonym name err) =
@@ -756,9 +786,9 @@ prettyPrintSingleError full level e = prettyPrintErrorMessage <$> onTypesInError
             ]
     go (PositionedError srcSpan err) =
       paras [ lineWithLevel $ "at " ++ displaySourceSpan srcSpan ++ ":"
-            , indent $ go err
+            , go err
             ]
-    go (SimpleErrorWrapper sem) = goSimple sem
+    go (SimpleErrorWrapper sem) = indent $ goSimple sem
 
   lineWithLevel :: String -> Box.Box
   lineWithLevel text = line $ show level ++ " " ++ text
@@ -908,8 +938,11 @@ prettyPrintParseErrorMessages msgOr msgUnknown msgExpecting msgUnExpected msgEnd
 
   clean             = nub . filter (not . null)
 
+-- | Indent to the right, and pad on top and bottom.
 indent :: Box.Box -> Box.Box
-indent = Box.moveRight 2
+indent b = Box.moveUp 1 $ Box.moveDown 1 $ Box.hsep 1 Box.left [ gutter, b ]
+  where
+  gutter = Box.vcat Box.left (replicate (Box.rows b) (Box.char '>'))
 
 line :: String -> Box.Box
 line = Box.text
