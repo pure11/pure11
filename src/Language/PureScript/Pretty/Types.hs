@@ -117,7 +117,7 @@ insertPlaceholders = everywhereOnTypesTopDown convertForAlls . everywhereOnTypes
   convertForAlls other = other
 
 matchTypeAtom :: Pattern () Type Box
-matchTypeAtom = typeLiterals <+> fmap ((text "(" <>) . (<> text ")")) matchType
+matchTypeAtom = typeLiterals <+> fmap ((`before` text ")") . (text "(" <>)) matchType
 
 matchType :: Pattern () Type Box
 matchType = buildPrettyPrinter operators matchTypeAtom
