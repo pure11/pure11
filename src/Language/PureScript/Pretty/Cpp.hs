@@ -20,6 +20,7 @@ module Language.PureScript.Pretty.Cpp (
     dotsTo,
     linebreak,
     prettyPrintCpp,
+    prettyPrintCpp1,
 ) where
 
 import Data.Bits
@@ -115,6 +116,17 @@ literals = mkPattern' match
     , return $ intercalate ", " es
     , return " }"
     ]
+  match (CppStruct name supers fs) = fmap concat $ sequence
+    [ return "struct "
+    , return name
+    , return $ if null supers then "" else " : "
+    , return $ intercalate ", " $ ("public " ++) <$> supers
+    , return " {\n"
+    , withIndent $ prettyStatements fs
+    , return "\n"
+    , currentIndent
+    , return "}"
+    ]
   match (CppObjectLiteral ps) = fmap concat $ sequence
     [ return $ runType mapType ++ "{\n"
     , withIndent $ do
@@ -134,12 +146,15 @@ literals = mkPattern' match
     , return "auto "
     , return name
     , return $ parens (intercalate ", " $ argstr <$> args)
+    , return $ if CppConstMember `elem` qs then " const" else ""
     , return (maybe "" ((" -> " ++) . runType) rty)
     , if ret /= CppNoOp
         then do
           cpps <- prettyPrintCpp' ret
           return $ ' ' : cpps
-        else return ""
+        else if CppVirtual `elem` qs
+               then return " = 0"
+               else return ""
     ]
   match (CppBlock sts) = concat <$> sequence
     [ return "{\n"

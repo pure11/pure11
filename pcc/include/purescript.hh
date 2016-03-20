@@ -59,6 +59,9 @@ public:
 const bool undefined = false;
 const size_t constructor = 0;
 
+struct typeclass {
+};
+
 // A variant data class designed to provide some features of dynamic typing.
 //
 class any {
@@ -309,6 +312,11 @@ class any {
   template <typename T>
   auto cast() const -> typename std::enable_if<std::is_assignable<shared<void>,T>::value, typename T::element_type*>::type {
     return static_cast<typename T::element_type*>(extractPointer());
+  }
+
+  template <typename T>
+  auto cast() const -> typename std::enable_if<std::is_base_of<typeclass, T>::value, const T&>::type {
+    throw "not implemented";
   }
 
   auto operator()(const any&) const -> any;

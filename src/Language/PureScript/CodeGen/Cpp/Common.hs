@@ -173,6 +173,7 @@ nameIsCppReserved name =
               , "typedef"
               , "typeid"
               , "typename"
+              , "typeclass"
               , "typeof"
               , "union"
               , "unsigned"

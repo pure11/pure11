@@ -26,6 +26,7 @@ module Language.PureScript.CodeGen.Cpp
   , P.prettyPrintCpp
   ) where
 
+import Debug.Trace
 import Data.Char (isLetter)
 import Data.List
 import Data.Function (on)
@@ -118,8 +119,45 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
   -------------------------------------------------------------------------------------------------
   declToCpp :: [CppValueQual] -> (Ann, Ident) -> Expr Ann -> m Cpp
   -------------------------------------------------------------------------------------------------
-  declToCpp _ _ (Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
-    return CppNoOp
+  declToCpp _ (_, ident) (Abs (_, _, _, Just IsTypeClassConstructor) _ _)
+    | Just (_, constraints, fns) <- findClass (Qualified (Just mn) (ProperName $ runIdent ident)) =
+      let supers = case P.prettyPrintCpp1 . qualifiedToCpp (Ident . runProperName) . fst <$> constraints of
+                     [] -> ["typeclass"]
+                     constraints' -> constraints'
+      in
+      return $ CppStruct
+                   (identToCpp ident)
+                   supers
+                   ((\f -> let name = identToCpp . Ident . fst $ f
+                               argcnt = countArgs $ snd f
+                            in CppFunction
+                                   name
+                                   (replicate argcnt ("", Just $ CppAny [CppConst, CppRef]))
+                                   (Just $ CppAny [])
+                                   [CppVirtual, CppConstMember]
+                                   CppNoOp) <$> fns)
+    | otherwise = return CppNoOp
+
+  declToCpp _ (_, ident@(Ident _)) e@App{}
+    | (Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)), args) <- unApp e [] = do
+      let args' = flip unAbs [] <$> args
+      let Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname))
+          supers = P.prettyPrintCpp1 .
+                   varToCpp .
+                   (\(Var _ var) -> var) .
+                   snd <$>
+                   take (length constraints) args'
+      return $ CppStruct
+                   (identToCpp ident)
+                   (classname : supers)
+                   ((\f -> let name = identToCpp . Ident . fst $ f
+                               argcnt = countArgs $ snd f
+                            in CppFunction
+                                   name
+                                   (replicate argcnt ("", Just $ CppAny [CppConst, CppRef]))
+                                   (Just $ CppAny [])
+                                   [CppConstMember]
+                                   CppNoOp) <$> fns)
 
   declToCpp _ (_, Op _) (Var (_, _, Nothing, _) _) =
     return CppNoOp -- skip operator aliases
@@ -127,17 +165,12 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
   declToCpp vqs (_, ident) (Abs (_, com, ty, _) arg body) = do
     fn <- if argcnt > 1 && CppTopLevel `elem` vqs
             then do
+              val' <- valueToCpp (snd abs')
               argNames <- replicateM (argcnt - length args' - 1) freshName
               let args'' = zip argNames (repeat aty)
-              block <- asReturnBlock <$> valueToCpp
-                         (if null argNames
-                            then snd abs'
-                            else curriedApp
-                                     (tail argNames)
-                                     (App
-                                        nullAnn
-                                        (snd abs')
-                                        (Var nullAnn . Qualified Nothing . Ident $ head argNames)))
+                  block = asReturnBlock $ if null argNames
+                                            then val'
+                                            else CppApp val' (CppVar <$> argNames)
               return $ CppNamespace ""
                            [ CppFunction
                                  name
@@ -157,12 +190,15 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
                                                   (CppVar . fst <$> (arg' : args' ++ args''))))
                            ]
             else do
-              block <- valueToCpp body
+              body' <- valueToCpp body
+              let (qs, block) = if isIndexer body'
+                                  then ([CppInline], CppApp body' [])
+                                  else ([], body')
               return $ CppFunction
                            name
                            [arg']
                            rty
-                           (vqs ++ if isIndexer block then [CppInline] else [])
+                           (vqs ++ qs)
                            (convertNestedLambdas $ asReturnBlock block)
     return (CppComment com fn)
     where
@@ -180,6 +216,7 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
     isAccessor _ = False
     isIndexer :: Cpp -> Bool
     isIndexer (CppIndexer (CppStringLiteral _) (CppVar _)) = True
+    isIndexer (CppBinary Dot (CppCast (CppPrimitive _) CppVar{}) CppVar{}) = True
     isIndexer _ = False
 
   declToCpp _ (_, ident) (Constructor _ _ (ProperName _) []) =
@@ -400,6 +437,11 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
   valueToCpp (Literal _ (ObjectLiteral ps)) =
     CppObjectLiteral <$> sortBy (compare `on` fst) <$> mapM (sndM valueToCpp) ps
 
+  -- TODO: need a more reliable way to detect typeclass dict
+  valueToCpp (Accessor _ prop (Var (Nothing, [], Nothing, Nothing) var@(Qualified Nothing (Ident _))))
+    | (className, _:prop'@(_:_)) <- break (== '.') prop =
+      return $ CppBinary Dot (CppCast (CppPrimitive className) (varToCpp var)) (CppVar . identToCpp $ Ident prop')
+    
   valueToCpp (Accessor _ prop val) =
     CppIndexer <$> pure (CppStringLiteral prop) <*> valueToCpp val
 
@@ -428,6 +470,14 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
           (Just $ CppAny [])
           (asReturnBlock cpp')
 
+  -- Typeclasses are rendered using structs with inheritance, so don't need to retrieve from supers
+  valueToCpp (App _ e (Var _ (Qualified (Just (ModuleName [ProperName argModName])) (Ident argName))))
+    | argName == C.undefined,
+      argModName == C.prim,
+      Accessor _ prop val <- e,
+      C.__superclass_ `isPrefixOf` prop =
+    valueToCpp val
+
   -- valueToCpp (App _ e (Var _ (Qualified (Just (ModuleName [ProperName "Prim"])) (Ident "undefined")))) =
   --   valueToCpp e
 
@@ -439,23 +489,25 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
       Var (_, _, _, Just (IsConstructor _ fields)) ident
         | length args == length fields ->
           return $ CppApp (uncurried' $ qualifiedToCpp id ident) args'
-      Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)) ->
-        let Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname)) in
-        return . CppObjectLiteral $
-                     zip
-                       ((sort $ superClassDictionaryNames constraints) ++ (fst <$> fns))
-                       (arity2or3 <$> args')
-        where
-        -- For arity 2/3 optimization
-        arity2or3 :: Cpp -> Cpp
-        arity2or3 (CppLambda cs [a1] rty
-                      (CppBlock [CppReturn (CppLambda _ [a2] _
-                                               (CppBlock [CppReturn (CppLambda _ [a3] _ ret)]))])) =
-          CppLambda cs [a1, a2, a3] rty ret
-        arity2or3 (CppLambda cs [a1] rty
-                      (CppBlock [CppReturn (CppLambda _ [a2] _ ret)])) =
-          CppLambda cs [a1, a2] rty ret
-        arity2or3 cpp' = cpp'
+
+      -- Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)) ->
+      --   let Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname)) in
+      --   return . CppObjectLiteral $
+      --                zip
+      --                  ((sort $ superClassDictionaryNames constraints) ++ (fst <$> fns))
+      --                  (arity2or3 <$> args')
+      --   where
+      --   -- For arity 2/3 optimization
+      --   arity2or3 :: Cpp -> Cpp
+      --   arity2or3 (CppLambda cs [a1] rty
+      --                 (CppBlock [CppReturn (CppLambda _ [a2] _
+      --                                          (CppBlock [CppReturn (CppLambda _ [a3] _ ret)]))])) =
+      --     CppLambda cs [a1, a2, a3] rty ret
+      --   arity2or3 (CppLambda cs [a1] rty
+      --                 (CppBlock [CppReturn (CppLambda _ [a2] _ ret)])) =
+      --     CppLambda cs [a1, a2] rty ret
+      --   arity2or3 cpp' = cpp'
+
       Var ann (Qualified (Just mn') ident)
         | argcnt <- maybe 0 countArgs ty,
           argcnt > 1 -> do

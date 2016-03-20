@@ -35,6 +35,7 @@ toHeader = catMaybes . map go
     | cpps'@(_:_) <- toHeader cpps = Just (CppNamespace name cpps')
     | otherwise = Nothing
   go cpp@(CppUseNamespace{}) = Just cpp
+  go cpp@CppStruct{} = Just cpp
   go (CppFunction _ _ _ qs _)
     | CppInline `elem` qs = Nothing
   go (CppFunction _ [(_, atyp)] _ _ (CppBlock [CppReturn (CppApp _ [_])])) | atyp == Just CppAuto

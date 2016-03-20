@@ -120,9 +120,9 @@ moduleToCoreFn env (A.Module _ coms mn decls (Just exps)) =
     let args = map (exprToCoreFn ss [] Nothing . snd) $ sortBy (compare `on` fst) vs
         ctor = Var (ss, [], Nothing, Just IsTypeClassConstructor) (fmap properToIdent name)
     in foldl (App (ss, com, Nothing, Nothing)) ctor args
-  exprToCoreFn ss com ty  (A.TypeClassDictionaryAccessor _ ident) =
+  exprToCoreFn ss com ty  (A.TypeClassDictionaryAccessor (Qualified _ (ProperName className)) ident) =
     Abs (ss, com, ty, Nothing) (Ident "dict")
-      (Accessor nullAnn (runIdent ident) (Var nullAnn $ Qualified Nothing (Ident "dict")))
+      (Accessor nullAnn (className ++ '.' : runIdent ident) (Var nullAnn $ Qualified Nothing (Ident "dict")))
   exprToCoreFn _ com ty (A.PositionedValue ss com1 v) =
     exprToCoreFn (Just ss) (com ++ com1) ty v
   exprToCoreFn _ _ _ e =

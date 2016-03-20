@@ -45,6 +45,14 @@ data CppValueQual
   --
   | CppInline
   -- |
+  -- virtual function
+  --
+  | CppVirtual
+  -- |
+  -- const member function
+  --
+  | CppConstMember
+  -- |
   -- C++11+ constant expression "constexpr"
   --
   | CppConstExpr
@@ -79,6 +87,8 @@ runType (CppAny qs)
 runValueQual :: CppValueQual -> String
 runValueQual CppStatic    = "static"
 runValueQual CppInline    = "inline"
+runValueQual CppVirtual   = "virtual"
+runValueQual CppConstMember = ""
 runValueQual CppConstExpr = "constexpr"
 runValueQual CppExtern    = "extern"
 runValueQual CppRecursive = ""
