@@ -30,10 +30,10 @@ import Debug.Trace
 import Data.Char (isLetter)
 import Data.List
 import Data.Function (on)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, isJust)
 import qualified Data.Map as M
 
-import Control.Monad (forM, replicateM)
+import Control.Monad (forM, liftM, replicateM)
 import Control.Monad.Reader (MonadReader)
 import Control.Monad.Supply.Class
 import Language.PureScript.AST.SourcePos
@@ -85,6 +85,7 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
                   P.linebreak ++
                   dataCtors ++
                   toHeader optimized ++
+                  instances optimized ++
                   toHeaderFns optimized
             ] ++
             P.linebreak ++
@@ -138,26 +139,69 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
                                    CppNoOp) <$> fns)
     | otherwise = return CppNoOp
 
-  declToCpp _ (_, ident@(Ident _)) e@App{}
-    | (Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)), args) <- unApp e [] = do
-      let args' = flip unAbs [] <$> args
-      let Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname))
+  declToCpp _ (_, ident@(Ident _)) e
+    | Just (app', abs') <- appExpr e,
+      (Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)), args) <- unApp app' [] = do
+      let unabs = flip unAbs [] <$> args
+          Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname))
           supers = P.prettyPrintCpp1 .
                    varToCpp .
-                   (\(Var _ var) -> var) .
+                   (\v -> case v of 
+                            Var _ var -> var
+                            App{} -> case fst $ unApp v [] of
+                                       (Var _ var) -> var
+                                       _ -> error $ show v -- TODO:
+                    ) .
                    snd <$>
-                   take (length constraints) args'
+                   take (length constraints) unabs
+          params = (map . map) identToCpp $ fst <$> drop (length constraints) unabs
+      bodies <- mapM (liftM asReturnBlock . valueToCpp . snd) $ drop (length constraints) unabs
+      argNames <- replicateM (if null fns then 0 else maximum (countArgs . snd <$> fns)) freshName
       return $ CppStruct
-                   (identToCpp ident)
+                   name
                    (classname : supers)
-                   ((\f -> let name = identToCpp . Ident . fst $ f
-                               argcnt = countArgs $ snd f
-                            in CppFunction
-                                   name
-                                   (replicate argcnt ("", Just $ CppAny [CppConst, CppRef]))
-                                   (Just $ CppAny [])
-                                   [CppConstMember]
-                                   CppNoOp) <$> fns)
+                   (((\(f, ps, body) -> let name = identToCpp . Ident . fst $ f
+                                            argcnt = countArgs $ snd f
+                                            argNames' = take (argcnt - length ps) argNames
+                                        in CppFunction
+                                               name
+                                               (zip (ps ++ argNames') $ repeat (Just $ CppAny [CppConst, CppRef]))
+                                               (Just $ CppAny [])
+                                               [CppConstMember]
+                                               CppNoOp) <$> zip3 fns params bodies) ++ ctor abs')
+    where
+    appExpr a'@(App{}) = Just (a', Nothing)
+    appExpr b'@(Abs{}) | (_, a'@App{}) <- unAbs b' [] = Just (a', Just b')
+    appExpr _ = Nothing
+    name = identToCpp ident
+    ctor (Just abs') = let (args', f') = unAbs abs' [] in [CppFunction name (zip (identToCpp <$> args') $ repeat (Just $ CppAny [CppConst, CppRef])) Nothing [CppCtor] CppNoOp]
+    ctor _ = []
+
+  -- Typeclass function from dictionary
+  declToCpp _ (_, ident) (Abs _ arg e)
+    | (args, f) <- unAbs e [],
+      Accessor _ _ (Var _ (Qualified Nothing var')) <- f,
+      var' == arg,
+      Just (t, _, _) <- M.lookup (mn, ident) (E.names env),
+      T.ConstrainedType [(constraint, _)] _ <- stripForAlls t = do
+        let argcnt = countArgs t - 1 -- subtract constraint dict
+        argNames <- replicateM (argcnt - length args) freshName
+        let args' = (CppVar . runIdent <$> args) ++ (CppVar <$> argNames)
+            argTypes = repeat $ Just $ CppAny [CppConst, CppRef]
+            className = P.prettyPrintCpp1 $ qualifiedToCpp (Ident . runProperName) constraint
+            cast = CppCast (CppPrimitive className) (CppVar $ identToCpp arg)
+            fname = identToCpp ident
+            block = asReturnBlock $ CppApp (CppBinary Dot cast (CppVar fname)) args'
+            fn' = CppFunction fname
+                              ([(identToCpp arg, head argTypes)] ++ zip argNames argTypes)
+                              (Just $ CppAny [])
+                              [CppInline]
+                              block
+        return fn'
+    where
+    stripForAlls :: T.Type -> T.Type
+    stripForAlls (T.ForAll _ t' _) = stripForAlls t'
+    stripForAlls t' = t'
 
   declToCpp _ (_, Op _) (Var (_, _, Nothing, _) _) =
     return CppNoOp -- skip operator aliases
@@ -166,11 +210,20 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
     fn <- if argcnt > 1 && CppTopLevel `elem` vqs
             then do
               val' <- valueToCpp (snd abs')
-              argNames <- replicateM (argcnt - length args' - 1) freshName
+              argNames <- replicateM (argcnt - length args') freshName
+              curriedVal' <- valueToCpp $
+                               curriedApp
+                                   (tail argNames)
+                                   (App
+                                     nullAnn
+                                     (snd abs')
+                                     (Var nullAnn . Qualified Nothing . Ident $ head argNames))              
               let args'' = zip argNames (repeat aty)
                   block = asReturnBlock $ if null argNames
                                             then val'
-                                            else CppApp val' (CppVar <$> argNames)
+                                            else if val' == CppVar name
+                                                   then CppApp val' (CppVar <$> argNames)
+                                                   else curriedVal'
               return $ CppNamespace ""
                            [ CppFunction
                                  name
@@ -412,6 +465,13 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
   valueToCpp (Var (_, _, _, Just (IsConstructor _ _)) ident) =
     return . curriedName' $ varToCpp ident
 
+  -- -- TODO: propose an easier way to check if it's a typeclass instance
+  -- valueToCpp (Var (_, _, Nothing, Nothing) ident@(Qualified (Just mn') _))
+  --   | Just instMod <- M.lookup (Just mn') (E.typeClassDictionaries env),
+  --     instMaps <- M.elems instMod,
+  --     any (isJust . M.lookup ident) instMaps =
+  --   return $ CppApp (qualifiedToCpp id ident) []
+
   valueToCpp (Var (_, _, Just ty, _) ident@(Qualified (Just _) _))
     | countArgs ty > 1 =
       return . curriedName' $ varToCpp ident
@@ -437,10 +497,10 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
   valueToCpp (Literal _ (ObjectLiteral ps)) =
     CppObjectLiteral <$> sortBy (compare `on` fst) <$> mapM (sndM valueToCpp) ps
 
-  -- TODO: need a more reliable way to detect typeclass dict
-  valueToCpp (Accessor _ prop (Var (Nothing, [], Nothing, Nothing) var@(Qualified Nothing (Ident _))))
-    | (className, _:prop'@(_:_)) <- break (== '.') prop =
-      return $ CppBinary Dot (CppCast (CppPrimitive className) (varToCpp var)) (CppVar . identToCpp $ Ident prop')
+  -- -- TODO: need a more reliable way to detect typeclass dict
+  -- valueToCpp (Accessor _ prop (Var (Nothing, [], Nothing, Nothing) var@(Qualified Nothing (Ident _))))
+  --   | (className, _:prop'@(_:_)) <- break (== '.') prop =
+  --     return $ CppBinary Dot (CppCast (CppPrimitive className) (varToCpp var)) (CppVar . identToCpp $ Ident prop')
     
   valueToCpp (Accessor _ prop val) =
     CppIndexer <$> pure (CppStringLiteral prop) <*> valueToCpp val
@@ -483,7 +543,7 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
 
   valueToCpp e@App{} = do
     let (f, args) = unApp e []
-    args' <- mapM valueToCpp args
+    args' <- mapM valueToCpp (dictVarToCtor <$> args)
     case f of
       Var (_, _, _, Just IsNewtype) _ -> return (head args')
       Var (_, _, _, Just (IsConstructor _ fields)) ident
@@ -525,10 +585,11 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
         ty | (_, _, Just t, _) <- ann = Just t
            | Just (t, _, _) <- M.lookup (mn', ident) (E.names env) = Just t
            | otherwise = Nothing
-      Accessor (_, _, Nothing, Nothing) _ (Var _ (Qualified Nothing (Ident _)))
-        | length args' == 2 || length args' == 3 -> do -- arity 2 optimization
-            f' <- valueToCpp f
-            return $ CppApp f' args'
+
+      -- Accessor (_, _, Nothing, Nothing) _ (Var _ (Qualified Nothing (Ident _)))
+      --   | length args' == 2 || length args' == 3 -> do -- arity 2 optimization
+      --       f' <- valueToCpp f
+      --       return $ CppApp f' args'
       _ ->
         flip (foldl (\fn a -> CppApp fn [a])) args' <$> valueToCpp f
 
@@ -856,6 +917,16 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
                    filter (\((mn', _), (_, kind, _)) -> mn' == mn && kind == E.External) .
                    M.toList $ E.names env
 
+  ---------------------------------------------------------------------------------------------------
+  dictVarToCtor :: Expr Ann -> Expr Ann
+  ---------------------------------------------------------------------------------------------------
+  dictVarToCtor var@(Var ann ident@(Qualified (Just mn') _))
+    | Just instMod <- M.lookup (Just mn') (E.typeClassDictionaries env),
+      instMaps <- M.elems instMod,
+      any (isJust . M.lookup ident) instMaps =
+        App nullAnn var (Var nullAnn (Qualified Nothing $ Ident ""))
+  dictVarToCtor e = e
+
 ---------------------------------------------------------------------------------------------------
 asReturnBlock :: Cpp -> Cpp
 ---------------------------------------------------------------------------------------------------
@@ -887,6 +958,7 @@ countArgs = go 0
   where
   go argcnt (T.ForAll _ t _) = go argcnt t
   go argcnt (T.TypeApp (T.TypeApp fn _) t) | fn == E.tyFunction = go (argcnt + 1) t
+  go argcnt (T.TypeApp (T.TypeApp (T.TypeVar _) (T.TypeVar _)) t) = go (argcnt + 1) t
   go argcnt (T.ConstrainedType ts t) = go (argcnt + length ts) t
   go argcnt _ = argcnt
 

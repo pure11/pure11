@@ -33,6 +33,7 @@ namespace PureScript {
     case Type::EffFunction:     new (&e) shared<eff_fn>(src.e);      break; \
     case Type::Thunk:           t = src.t;                           break; \
     case Type::Pointer:         new (&p) shared<void>(src.p);        break; \
+    case Type::Typeclass:       new (&y) typeclass(*src.y);          break; \
     \
     default: assert(false && "Unsupported type in copy"); \
   }
@@ -53,6 +54,7 @@ namespace PureScript {
     case Type::EffFunction:     new (&e) shared<eff_fn>(std::move(src.e));      break; \
     case Type::Thunk:           t = src.t;                                      break; \
     case Type::Pointer:         new (&p) shared<void>(std::move(src.p));        break; \
+    case Type::Typeclass:       y = src.y; src.y = nullptr                      break; \
     \
     default: assert(false && "Unsupported type in move"); \
   }
@@ -99,6 +101,7 @@ any::~any() {
     case Type::EffFunction:     e.~shared<eff_fn>();       break;
     case Type::Thunk:           ;                          break;
     case Type::Pointer:         p.~shared<void>();         break;
+    case Type::Typeclass:       y.~typeclass();            break;
 
     default: assert(false && "Unsupported type in destructor");
   }

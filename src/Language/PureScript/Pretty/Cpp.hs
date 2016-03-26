@@ -120,7 +120,7 @@ literals = mkPattern' match
     [ return "struct "
     , return name
     , return $ if null supers then "" else " : "
-    , return $ intercalate ", " $ ("public " ++) <$> supers
+    , return $ intercalate ", " $ ("public virtual " ++) <$> supers
     , return " {\n"
     , withIndent $ prettyStatements fs
     , return "\n"
@@ -143,7 +143,7 @@ literals = mkPattern' match
   match (CppFunction name args rty qs ret) =
     fmap concat $ sequence
     [ return . concatMap (++ " ") . filter (not . null) $ runValueQual <$> qs
-    , return "auto "
+    , return $ if CppCtor `notElem` qs then "auto " else " "
     , return name
     , return $ parens (intercalate ", " $ argstr <$> args)
     , return $ if CppConstMember `elem` qs then " const" else ""

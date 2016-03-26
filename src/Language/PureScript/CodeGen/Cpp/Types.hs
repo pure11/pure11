@@ -49,6 +49,10 @@ data CppValueQual
   --
   | CppVirtual
   -- |
+  -- C++ constructor
+  --
+  | CppCtor
+  -- |
   -- const member function
   --
   | CppConstMember
@@ -88,6 +92,7 @@ runValueQual :: CppValueQual -> String
 runValueQual CppStatic    = "static"
 runValueQual CppInline    = "inline"
 runValueQual CppVirtual   = "virtual"
+runValueQual CppCtor      = ""
 runValueQual CppConstMember = ""
 runValueQual CppConstExpr = "constexpr"
 runValueQual CppExtern    = "extern"

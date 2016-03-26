@@ -17,13 +17,55 @@
 
 module Language.PureScript.CodeGen.Cpp.File where
 
+import Data.Char (isLower, isUpper)
+import Data.Tuple (swap)
 import Data.Maybe
+import qualified Data.Graph as G
 
 import Language.PureScript.CodeGen.Cpp.AST
 import Language.PureScript.CodeGen.Cpp.Types
 import Language.PureScript.Names
-
 import qualified Language.PureScript.Pretty.Cpp as P
+
+---------------------------------------------------------------------------------------------------
+instances :: [Cpp] -> [Cpp]
+---------------------------------------------------------------------------------------------------
+instances = depSortInstances . catMaybes . map go
+  where
+  go :: Cpp -> Maybe Cpp
+  go cpp@(CppStruct (c:_) _ _) | isLower c = Just cpp
+  go _ = Nothing
+
+---------------------------------------------------------------------------------------------------
+depSortInstances :: [Cpp] -> [Cpp]
+---------------------------------------------------------------------------------------------------
+depSortInstances cpps = reverse . catMaybes $
+                            flip lookup vertexCpps <$>
+                                G.topSort (G.buildG (1, length cpps) (concatMap findEdges cpps))
+  where
+  findEdges :: Cpp -> [G.Edge]
+  findEdges cpp@(CppStruct _ supers _)
+    | Just thisVertex <- lookup cpp vertexCpps' =
+      concatMap (go thisVertex) $ filter (isLower . head) supers
+  findEdges _ = []
+
+  go :: G.Vertex -> String -> [G.Edge]
+  go thisVertex name
+    | Just depVertex <- lookup name vertexes = [(thisVertex, depVertex)]
+  go _ _ = []
+
+  vertexes :: [(String, G.Vertex)]
+  vertexes = zip (getName <$> cpps) [1 ..]
+
+  vertexCpps :: [(G.Vertex, Cpp)]
+  vertexCpps = zip [1 ..] cpps
+
+  vertexCpps' :: [(Cpp, G.Vertex)]
+  vertexCpps' = swap <$> vertexCpps
+
+  getName :: Cpp -> String
+  getName (CppStruct name _ _) = name
+  getName cpp = error $ "Wrong kind of Cpp value! " ++ show cpp
 
 ---------------------------------------------------------------------------------------------------
 toHeader :: [Cpp] -> [Cpp]
@@ -35,7 +77,7 @@ toHeader = catMaybes . map go
     | cpps'@(_:_) <- toHeader cpps = Just (CppNamespace name cpps')
     | otherwise = Nothing
   go cpp@(CppUseNamespace{}) = Just cpp
-  go cpp@CppStruct{} = Just cpp
+  go cpp@(CppStruct (c:_) _ _) | isUpper c = Just cpp
   go (CppFunction _ _ _ qs _)
     | CppInline `elem` qs = Nothing
   go (CppFunction _ [(_, atyp)] _ _ (CppBlock [CppReturn (CppApp _ [_])])) | atyp == Just CppAuto

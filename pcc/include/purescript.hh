@@ -60,6 +60,7 @@ const bool undefined = false;
 const size_t constructor = 0;
 
 struct typeclass {
+  virtual ~typeclass() {}
 };
 
 // A variant data class designed to provide some features of dynamic typing.
@@ -82,7 +83,8 @@ class any {
     Closure,
     EffFunction,
     Thunk,
-    Pointer
+    Pointer,
+    Typeclass
   };
 
   private:
@@ -203,6 +205,7 @@ class any {
     mutable shared<eff_fn>       e;
     mutable thunk                t;
     mutable shared<void>         p;
+    mutable typeclass*           y;
   };
 
   public:
@@ -274,6 +277,8 @@ class any {
     : type(Type::Pointer), p(std::move(val)) {}
 
   any(std::nullptr_t) : type(Type::Pointer), p(nullptr) {}
+
+  any(const typeclass val) : type(Type::Typeclass), y(new typeclass(val)) {}
 
   any(const any&);
   any(any&&) noexcept;
