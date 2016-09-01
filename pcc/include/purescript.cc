@@ -22,27 +22,9 @@ namespace PureScript {
   assert(variant.type == TYPE); \
   return INDIRECTION(variant.ACCESSOR); \
 
-auto any::operator()(const any& arg) const -> any {
-  const any& variant = unthunkVariant(*this);
-  if (variant.type == Type::Closure) {
-    return (*variant.l)(arg);
-  }
-  assert(variant.type == Type::Function);
-  return (*variant.f)(arg);
-}
-
 auto any::operator()(const as_thunk) const -> const any& {
   assert(type == Type::Thunk);
   return (*t)(unthunk);
-}
-
-auto any::operator()() const -> any {
-  const any& variant = unthunkVariant(*this);
-  if (variant.type == Type::EffClosure) {
-    return (*variant.k)();
-  }
-  assert(variant.type == Type::EffFunction);
-  return (*variant.e)();
 }
 
 any::operator int() const {

@@ -34,6 +34,7 @@
 #include <stdexcept>
 #include <iso646.h> // mostly for MS Visual Studio compiler
 #include "purescript_memory.hh"
+#include "purescript_templates.hh"
 
 namespace PureScript {
 
@@ -49,12 +50,13 @@ public:
 const bool undefined = false;
 const size_t constructor = 0;
 
+
 // A variant data class designed to provide some features of dynamic typing.
 //
 class any {
 
   public:
-  enum class Type {
+  enum class Type : short {
     Thunk = 0x10,
     Integer,
     Double,
@@ -62,19 +64,18 @@ class any {
     Boolean,
     StringLiteral,
     Function,
-    EffFunction,
     RawPointer,
     String,
     Map,
     Data,
     Array,
     Closure,
-    EffClosure,
     Pointer
   };
 
   private:
   mutable Type type;
+  mutable short arity;
 
   public:
   struct as_thunk {
@@ -85,40 +86,37 @@ class any {
   using map      = std::vector<map_pair WITH_ALLOCATOR(map_pair)>;
   using data     = std::vector<any WITH_ALLOCATOR(any)>;
   using array    = std::deque<any WITH_ALLOCATOR(any)>;
-  using fn       = auto (*)(const any&) -> any;
-  using eff_fn   = auto (*)() -> any;
-  using thunk    = auto (*)(const as_thunk) -> const any&;
+
+  template <typename T, typename... Args>
+  using fn = auto (*)(Args...) -> T;
+
+  using thunk = auto (*)(const as_thunk) -> const any&;
 
   private:
   class closure {
     public:
-      virtual auto operator()(const any&) const -> any = 0;
+
+      #define VIRTUAL_CALL_OPERATOR(...) \
+      virtual auto operator()(__VA_ARGS__) const -> any { \
+        assert(false && "Wrong function arity"); \
+        return nullptr; \
+      }
+
+      #define MAKE_VIRTUAL_CALL_OPERATOR(N) VIRTUAL_CALL_OPERATOR(PARAMS_FOR_ARITY_ ## N (any))
+
+      ALL_VERSIONS(MAKE_VIRTUAL_CALL_OPERATOR)
+
       virtual ~closure() {}
   };
 
-  template <typename T>
+  template <typename T, typename... Args>
   class _closure : public closure {
     const T lambda;
   public:
     _closure(const T& l) noexcept : lambda(l) {}
-    auto operator()(const any& arg) const -> any override {
-      return lambda(arg);
-    }
-  };
 
-  class eff_closure {
-    public:
-      virtual auto operator()() const -> any = 0;
-      virtual ~eff_closure() {}
-  };
-
-  template <typename T>
-  class _eff_closure : public eff_closure {
-    const T lambda;
-  public:
-    _eff_closure(const T& l) noexcept : lambda(l) {}
-    auto operator()() const -> any override {
-      return lambda();
+    auto operator()(Args&&... args) const -> any override {
+      return lambda(std::forward<Args>(args)...);
     }
   };
 
@@ -130,15 +128,13 @@ class any {
     mutable char                  c;
     mutable bool                  b;
     mutable cstring               r;
-    mutable fn                    f;
-    mutable eff_fn                e;
+    mutable void *                f;
     mutable void *                u;
     mutable managed<std::string>  s;
     mutable managed<map>          m;
     mutable managed<data>         v;
     mutable managed<array>        a;
     mutable managed<closure>      l;
-    mutable managed<eff_closure>  k;
     mutable managed<void>         p;
   };
 
@@ -157,6 +153,7 @@ class any {
 
   template <size_t N>
   any(const char (&val)[N]) noexcept : type(Type::StringLiteral), r(val) {}
+  any(const char * val) noexcept : type(Type::StringLiteral), r(val) {}
   any(char * val) : type(Type::String), s(make_managed<std::string>(val)) {}
 
   any(const std::string& val) : type(Type::String), s(make_managed<std::string>(val)) {}
@@ -174,24 +171,31 @@ class any {
   any(const array& val) : type(Type::Array), a(make_managed<array>(val)) {}
   any(array&& val) noexcept : type(Type::Array), a(make_managed<array>(std::move(val))) {}
 
-  template <typename T>
-  any(const T& val, typename std::enable_if<std::is_convertible<T,fn>::value>::type* = 0) noexcept
-    : type(Type::Function), f(val) {}
+  // Functions //
 
-  template <typename T, typename = typename std::enable_if<!std::is_same<any,T>::value &&
-                                                           !std::is_convertible<T,fn>::value>::type>
-  any(const T& val, typename std::enable_if<std::is_assignable<std::function<any(const any&)>,T>::value>::type* = 0)
-    : type(Type::Closure), l(make_managed<_closure<T>>(val)) {}
+  #define MAKE_FUNCTION_CTOR(ARITY) \
+  template <typename T> \
+  any(const T& val, \
+      typename std::enable_if<std::is_convertible<T, for_parameters<ARITY,any>::make_type<any,fn>>::value>::type* = 0) noexcept \
+    : type(Type::Function), \
+      arity(ARITY), \
+      f(reinterpret_cast<decltype(f)>(for_parameters<ARITY,any>::make_type<any,fn>(val))) {}
 
-  template <typename T>
-  any(const T& val, typename std::enable_if<std::is_convertible<T,eff_fn>::value>::type* = 0) noexcept
-    : type(Type::EffFunction), e(val) {}
+  ALL_VERSIONS(MAKE_FUNCTION_CTOR)
 
-  template <typename T,
-            typename = typename std::enable_if<!std::is_same<any,T>::value &&
-                                               !std::is_convertible<T,eff_fn>::value>::type>
-  any(const T& val, typename std::enable_if<std::is_assignable<std::function<any()>,T>::value>::type* = 0)
-    : type(Type::EffClosure), k(make_managed<_eff_closure<T>>(val)) {}
+  // Closures //
+
+  #define MAKE_CLOSURE_CTOR(ARITY) \
+  template <typename T, \
+            typename = typename std::enable_if<!std::is_same<any,T>::value && \
+                                               !std::is_convertible<T,for_parameters<ARITY,any>::make_type<any,fn>>::value>::type> \
+  any(const T& val, \
+      typename std::enable_if<std::is_assignable<for_parameters<ARITY,any>::make_type<any,std_function>,T>::value>::type* = 0) \
+    : type(Type::Closure), \
+      arity(ARITY), \
+      l(make_managed<for_parameters<ARITY,any>::make_type<T,_closure>>(val)) {}
+
+  ALL_VERSIONS(MAKE_CLOSURE_CTOR)
 
   template <typename T>
   any(const T& val, typename std::enable_if<std::is_convertible<T,thunk>::value>::type* = 0) noexcept
@@ -240,7 +244,6 @@ class any {
       case Type::Boolean:        b = other.b;  break;
       case Type::StringLiteral:  r = other.r;  break;
       case Type::Function:       f = other.f;  break;
-      case Type::EffFunction:    e = other.e;  break;
       case Type::RawPointer:     u = other.u;  break;
 
       case Type::String:      new (&s) managed<std::string>(move_if_rvalue<T>(other.s));  break;
@@ -248,7 +251,6 @@ class any {
       case Type::Data:        new (&v) managed<data>(move_if_rvalue<T>(other.v));         break;
       case Type::Array:       new (&a) managed<array>(move_if_rvalue<T>(other.a));        break;
       case Type::Closure:     new (&l) managed<closure>(move_if_rvalue<T>(other.l));      break;
-      case Type::EffClosure:  new (&k) managed<eff_closure>(move_if_rvalue<T>(other.k));  break;
       case Type::Pointer:     new (&p) managed<void>(move_if_rvalue<T>(other.p));         break;
 
       default: assert(false && "Bad 'any' type"); break;
@@ -262,7 +264,6 @@ class any {
       case Type::Data:        v.~managed<data>();          break;
       case Type::Array:       a.~managed<array>();         break;
       case Type::Closure:     l.~managed<closure>();       break;
-      case Type::EffClosure:  k.~managed<eff_closure>();   break;
       case Type::Pointer:     p.~managed<void>();          break;
 
       default: break;
@@ -270,17 +271,18 @@ class any {
   }
 
   public:
-  any(const any& other) noexcept : type(other.type) {
+  any(const any& other) noexcept : type(other.type), arity(other.arity) {
     assign(other);
   }
 
-  any(any&& other) noexcept : type(other.type) {
+  any(any&& other) noexcept : type(other.type), arity(other.arity) {
     assign(std::move(other));
   }
 
   auto operator=(const any& rhs) noexcept -> any& {
     destruct();
     type = rhs.type;
+    arity = rhs.arity;
     assign(rhs);
     return *this;
   }
@@ -288,6 +290,7 @@ class any {
   auto operator=(any&& rhs) noexcept -> any& {
     destruct();
     type = rhs.type;
+    arity = rhs.arity;
     assign(std::move(rhs));
     return *this;
   }
@@ -300,9 +303,18 @@ class any {
   public:
   any() = delete;
 
-  auto operator()(const any&) const -> any;
+  template <typename... Args>
+  auto operator()(Args&&... args) const -> any {
+    const any& variant = unthunkVariant(*this);
+    if (variant.type == Type::Closure) {
+      return (*variant.l)(std::forward<Args>(args)...);
+    }
+    assert(variant.type == Type::Function);
+    assert(variant.arity == sizeof...(Args));
+    return (*reinterpret_cast<typename for_parameters<sizeof...(Args), any>::template make_type<any,fn>>(variant.f))(std::forward<Args>(args)...);
+  }
+
   auto operator()(const as_thunk) const -> const any&;
-  auto operator()() const -> any;
 
   operator int() const;
   operator double() const;
@@ -422,5 +434,9 @@ inline auto cast(const any& a) ->
 #undef IS_POINTER_TYPE
 #undef DEFINE_OPERATOR
 #undef DECLARE_COMPARISON_OPERATOR
+#undef MAKE_FUNCTION_CTOR
+#undef MAKE_CLOSURE_CTOR
+#undef VIRTUAL_CALL_OPERATOR
+#undef MAKE_VIRTUAL_CALL_OPERATOR
 
 #endif // PureScript_HH

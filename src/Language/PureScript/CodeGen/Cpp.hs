@@ -71,7 +71,9 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
         (snd <$> imps)
     let cppImports' = "PureScript" : cppImports
     cppDecls <- concat <$> mapM (bindToCpp [CppTopLevel]) decls
-    cppDecls' <- traverse optimize cppDecls
+    -- cppDecls' <- traverse (optimize env) cppDecls
+    let namesmap = M.mapKeysMonotonic (qualifiedToCpp id) . M.map (\(t, _, _) -> arity t) $ E.names env
+    cppDecls' <- traverse (optimize $ M.toList namesmap) cppDecls
     foreignWrappers <- curriedForeigns
     let optimized = cppDecls' ++ foreignWrappers
     let moduleHeader =
@@ -131,35 +133,40 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
             then do
               argNames <- replicateM (arity' - length args' - 1) freshName
               let args'' = zip argNames (repeat aty)
-              block <- asReturnBlock <$> valueToCpp
-                         (if null argNames
-                            then snd abs'
-                            else curriedApp
-                                     (tail argNames)
-                                     (App
-                                        nullAnn
-                                        (snd abs')
-                                        (Var nullAnn . Qualified Nothing . Ident $ head argNames)))
+              block <- if isAccessor absBody && not (null argNames)
+                         then do
+                           f <- valueToCpp vqs absBody
+                           return . asReturnBlock $ CppApp f (CppVar <$> argNames)
+                         else do
+                           f <- valueToCpp vqs
+                                  (if null argNames
+                                     then absBody
+                                     else curriedApp
+                                              (tail argNames)
+                                              (App
+                                                 nullAnn
+                                                 absBody
+                                                 (Var nullAnn . Qualified Nothing . Ident $ head argNames)))
+                           return $ asReturnBlock f
               return $ CppNamespace ""
                            [ CppFunction
                                  name
                                  (arg' : args' ++ args'')
                                  rty
-                                 (vqs ++ if isAccessor (snd abs') then [CppInline] else [])
+                                 (vqs ++ if isAccessor absBody then [CppInline] else [])
                                  (convertNestedLambdas $ convertDictIndexers block)
                            , CppFunction
                                  (curriedName name)
                                  [arg']
                                  rty
                                  []
-                                 (asReturnBlock $
-                                      curriedLambda
-                                          (fst <$> args' ++ args'')
-                                          (CppApp (CppVar name)
-                                                  (CppVar . fst <$> (arg' : args' ++ args''))))
+                                 (curriedLambda
+                                      (fst <$> args' ++ args'')
+                                      (CppApp (CppVar name)
+                                              (CppVar . fst <$> (arg' : args' ++ args''))))
                            ]
             else do
-              block <- valueToCpp body
+              block <- valueToCpp vqs body
               return $ CppFunction
                            name
                            [arg']
@@ -178,6 +185,7 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
     arg' = (identToCpp arg, aty)
     args' = (\i -> (identToCpp i, aty)) <$> fst abs'
     abs' = unAbs body []
+    absBody = snd abs'
     isAccessor :: Expr Ann -> Bool
     isAccessor Accessor{} = True
     isAccessor _ = False
@@ -242,7 +250,7 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
       arity' <- arity ty,
       arity' > 0 = do
         argNames <- replicateM arity' freshName
-        block <- valueToCpp $
+        block <- valueToCpp qs $
                    curriedApp
                        (tail argNames)
                        (App nullAnn e (Var nullAnn . Qualified Nothing . Ident $ head argNames))
@@ -251,11 +259,10 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
                      [(head argNames, Just $ CppAny [CppConst, CppRef])]
                      rty
                      []
-                     (asReturnBlock $
-                          curriedLambda
-                              (tail argNames)
-                              (CppApp (CppVar name)
-                                      (CppVar <$> argNames)))
+                     (curriedLambda
+                          (tail argNames)
+                          (CppApp (CppVar name)
+                                  (CppVar <$> argNames)))
         return $ CppNamespace "" $
                      [ CppFunction
                            name
@@ -271,8 +278,8 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
     aty = Just $ CppAny [CppConst, CppRef]
     rty = Just $ CppAny []
 
-  declToCpp _ (_, ident) val = do
-    val' <- valueToCpp val
+  declToCpp qs (_, ident) val = do
+    val' <- valueToCpp qs val
     return $
       CppVariableIntroduction
           (identToCpp ident, Just $ CppAny [CppConst])
@@ -287,20 +294,6 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
   exprType (Case (_, _, Just ty, _) _ _) = Just ty
   exprType (Let (_, _, Just ty, _) _ _) = Just ty
   exprType _ = Nothing
-
-  -------------------------------------------------------------------------------------------------
-  fnToLambda :: Cpp -> Cpp
-  -------------------------------------------------------------------------------------------------
-  fnToLambda (CppFunction name args _ qs body) =
-    CppVariableIntroduction
-        (name, Just $ CppAny [CppConst])
-        (filter (==CppStatic) qs)
-        (Just $ CppLambda cs args (Just $ CppAny []) body)
-    where
-    cs | (not . null) (qs `intersect` [CppInline, CppStatic]) = []
-       | otherwise = [CppCaptureAll]
-  fnToLambda (CppComment com cpp) = CppComment com (fnToLambda cpp)
-  fnToLambda _ = error "Not a function!"
 
   -------------------------------------------------------------------------------------------------
   convertNestedLambdas :: Cpp -> Cpp
@@ -385,49 +378,49 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
   -- Generate code in the simplified C++1x intermediate representation for a value or expression.
   --
   -------------------------------------------------------------------------------------------------
-  valueToCpp :: Expr Ann -> m Cpp
+  valueToCpp :: [CppValueQual] -> Expr Ann -> m Cpp
   -------------------------------------------------------------------------------------------------
-  valueToCpp (Var (_, _, _, Just (IsConstructor _ [])) ident) =
+  valueToCpp _ (Var (_, _, _, Just (IsConstructor _ [])) ident) =
     return $ CppApp (varToCpp ident) []
 
-  valueToCpp (Var (_, _, _, Just (IsConstructor _ [_])) ident) =
+  valueToCpp _ (Var (_, _, _, Just (IsConstructor _ [_])) ident) =
     return $ varToCpp ident
 
-  valueToCpp (Var (_, _, _, Just (IsConstructor _ _)) ident) =
+  valueToCpp _ (Var (_, _, _, Just (IsConstructor _ _)) ident) =
     return . curriedName' $ varToCpp ident
 
-  valueToCpp (Var (_, _, Just ty, _) ident@(Qualified (Just _) _))
+  valueToCpp _ (Var (_, _, Just ty, _) ident@(Qualified (Just _) _))
     | arity ty > 1 =
       return . curriedName' $ varToCpp ident
 
-  valueToCpp (Var _ ident) =
+  valueToCpp _ (Var _ ident) =
     return $ varToCpp ident
 
-  valueToCpp (Literal _ (NumericLiteral n)) =
+  valueToCpp _ (Literal _ (NumericLiteral n)) =
     return (CppNumericLiteral n)
 
-  valueToCpp (Literal _ (StringLiteral s)) =
+  valueToCpp _ (Literal _ (StringLiteral s)) =
     return (CppStringLiteral s)
 
-  valueToCpp (Literal _ (CharLiteral c)) =
+  valueToCpp _ (Literal _ (CharLiteral c)) =
     return (CppCharLiteral c)
 
-  valueToCpp (Literal _ (BooleanLiteral b)) =
+  valueToCpp _ (Literal _ (BooleanLiteral b)) =
     return (CppBooleanLiteral b)
 
-  valueToCpp (Literal _ (ArrayLiteral xs)) =
-    CppArrayLiteral <$> mapM valueToCpp xs
+  valueToCpp _ (Literal _ (ArrayLiteral xs)) =
+    CppArrayLiteral <$> mapM (valueToCpp []) xs
 
-  valueToCpp (Literal _ (ObjectLiteral ps)) =
-    CppObjectLiteral CppRecord <$> sortBy (compare `on` fst) <$> mapM (sndM valueToCpp) ps
+  valueToCpp _ (Literal _ (ObjectLiteral ps)) =
+    CppObjectLiteral CppRecord <$> sortBy (compare `on` fst) <$> mapM (sndM $ valueToCpp []) ps
 
-  valueToCpp (Accessor _ prop val) =
-    CppIndexer <$> pure (CppStringLiteral prop) <*> valueToCpp val
+  valueToCpp _ (Accessor _ prop val) =
+    CppIndexer <$> pure (CppStringLiteral prop) <*> valueToCpp [] val
 
   -- TODO: use a more efficient way of copying/updating the map?
-  valueToCpp (ObjectUpdate (_, _, Just ty, _) obj ps) = do
-    obj' <- valueToCpp obj
-    updatedFields <- mapM (sndM valueToCpp) ps
+  valueToCpp _ (ObjectUpdate (_, _, Just ty, _) obj ps) = do
+    obj' <- valueToCpp [] obj
+    updatedFields <- mapM (sndM $ valueToCpp []) ps
     let origKeys = (allKeys ty) \\ (fst <$> updatedFields)
         origFields = (\key -> (key, CppIndexer (CppStringLiteral key) obj')) <$> origKeys
     return $ CppObjectLiteral CppRecord . sortBy (compare `on` fst) $ origFields ++ updatedFields
@@ -437,17 +430,33 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
     allKeys (T.ForAll _ t _) = allKeys t
     allKeys _ = error $ show "Not a recognized row type"
 
-  valueToCpp (ObjectUpdate _ _ _) = error $ "Bad Type in object update!"
+  valueToCpp _ (ObjectUpdate _ _ _) = error $ "Bad Type in object update!"
 
-  valueToCpp (Abs (_, _, ty, _) arg body) = do
-    cpp <- valueToCpp body
-    let cpp' = convertNestedLambdas cpp
+  valueToCpp qs (Abs (_, _, ty, _) arg body)
+    | CppTopLevel `elem` qs = do
+    cpp' <- valueToCpp [] cpp
+    return $
+      CppLambda
+          []
+          (args' `zip` repeat (Just $ CppAny [CppConst, CppRef]))
+          (Just $ CppAny [])
+          (asReturnBlock . convertDictIndexers $ convertNestedLambdas cpp')
+    where
+      (args, cpp) = unAbs body []
+      args' = identToCpp <$> arg:args
+      classes = qualifiedToCpp (Ident . runProperName) . T.constraintClass <$>
+                    maybe [] extractConstraints ty
+      dictClasses = zip (CppVar <$> args') classes
+      convertDictIndexers = everywhereOnCpp (dictIndexerToEnum dictClasses)
+
+  valueToCpp _ (Abs (_, _, ty, _) arg body) = do
+    cpp' <- valueToCpp [] body
     return $
       CppLambda
           []
           [(identToCpp arg, Just $ CppAny [CppConst, CppRef])]
           (Just $ CppAny [])
-          (asReturnBlock $ convertDictIndexers cpp')
+          (asReturnBlock . convertDictIndexers $ convertNestedLambdas cpp')
     where
       arg' = identToCpp arg
       args' = identToCpp <$> (fst $ unAbs body [])
@@ -455,24 +464,27 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
                     maybe [] extractConstraints ty
       dictClasses = zip (CppVar <$> arg' : args') classes
       convertDictIndexers = everywhereOnCpp (dictIndexerToEnum dictClasses)
-  valueToCpp e@App{} = do
+
+  valueToCpp _ e@App{} = do
     let (f, args) = unApp e []
-    args' <- mapM valueToCpp args
+    args' <- mapM (valueToCpp []) args
     case f of
       Var (_, _, _, Just IsNewtype) _ -> return (head args')
       Var (_, _, _, Just (IsConstructor _ fields)) ident
         | length args == length fields ->
           return $ CppApp (uncurried' $ qualifiedToCpp id ident) args'
-      Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)) ->
-        let Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname)) in
+      Var (_, _, _, Just IsTypeClassConstructor) (Qualified mn' (Ident classname)) -> do
+        bodies <- mapM (valueToCpp [CppTopLevel]) args
+        let Just (_, constraints, fns) = findClass (Qualified mn' (ProperName classname))
+            names = (sort $ superClassDictionaryNames constraints) ++ (fst <$> fns)
+            limits = replicate (length constraints) Nothing ++ (Just . arity . snd <$> fns)
         return . CppObjectLiteral CppInstance $
-                     zip
-                       ((sort $ superClassDictionaryNames constraints) ++ (fst <$> fns))
-                       args'
+            zip names (zipWith normalizeArity limits bodies)
+
       Var ann (Qualified (Just mn') ident)
         | arity' <- maybe 0 arity ty,
           arity' > 1 -> do
-            f' <- valueToCpp f
+            f' <- valueToCpp [] f
             let (uncurriedArgs, curriedArgs) =
                   if length args' >= arity'
                     then splitAt arity' args'
@@ -487,15 +499,15 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
            | Just (t, _, _) <- M.lookup (Qualified (Just mn') ident) (E.names env) = Just t
            | otherwise = Nothing
       _ ->
-        flip (foldl (\fn a -> CppApp fn [a])) args' <$> valueToCpp f
+        flip (foldl (\fn a -> CppApp fn [a])) args' <$> valueToCpp [] f
 
-  valueToCpp (Case (maybeSpan, _, ty, _) values binders) = do
-    vals <- mapM valueToCpp values
+  valueToCpp _ (Case (maybeSpan, _, ty, _) values binders) = do
+    vals <- mapM (valueToCpp []) values
     bindersToCpp maybeSpan ty binders vals
 
-  valueToCpp (Let _ ds val) = do
+  valueToCpp _ (Let _ ds val) = do
     ds' <- concat <$> mapM (bindToCpp []) ds
-    ret <- valueToCpp val
+    ret <- valueToCpp [] val
     opts <- ask
     let ds'' = tco opts <$> ds'
     let rs = if hasRecursion ds''
@@ -524,7 +536,7 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
       ref (CppVar name) | name `elem` fnames = True
       ref _ = False
 
-  valueToCpp Constructor{} = return CppNoOp
+  valueToCpp _ Constructor{} = return CppNoOp
 
   -- |
   -- Generate code in the simplified C++1x intermediate representation for a reference to a
@@ -578,10 +590,10 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
 
       guardsToCpp :: Either [(Guard Ann, Expr Ann)] (Expr Ann) -> m [Cpp]
       guardsToCpp (Left gs) = forM gs $ \(cond, val) -> do
-        cond' <- valueToCpp cond
-        done  <- valueToCpp val
+        cond' <- valueToCpp [] cond
+        done  <- valueToCpp [] val
         return $ CppIfElse cond' (asReturnBlock done) Nothing
-      guardsToCpp (Right v) = return . CppReturn <$> valueToCpp v
+      guardsToCpp (Right v) = return . CppReturn <$> valueToCpp [] v
 
   -- |
   -- Generate code in the simplified C++1x intermediate representation for a pattern match
@@ -801,11 +813,10 @@ moduleToCpp env (Module _ mn imps _ foreigns decls) = do
                   [(head argNames, Just $ CppAny [CppConst, CppRef])]
                   (Just $ CppAny [])
                   []
-                  (asReturnBlock $
-                      curriedLambda
-                          (tail argNames)
-                          (CppApp (CppVar name)
-                                  (CppVar <$> argNames)))
+                  (curriedLambda
+                       (tail argNames)
+                       (CppApp (CppVar name)
+                               (CppVar <$> argNames)))
             ]
     go _ = return []
 
@@ -822,7 +833,8 @@ asReturnBlock cpp = CppBlock [CppReturn cpp]
 ---------------------------------------------------------------------------------------------------
 curriedLambda :: [String] -> Cpp -> Cpp
 ---------------------------------------------------------------------------------------------------
-curriedLambda args ret = foldr (\arg ret' -> CppLambda
+curriedLambda args ret = foldr (\arg ret' -> asReturnBlock $
+                                               CppLambda
                                                  [CppCaptureAll]
                                                  [(arg, Just $ CppAny [CppConst, CppRef])]
                                                  (Just $ CppAny [])
@@ -838,6 +850,20 @@ curriedApp args vals = foldl (\val arg -> App
                                             (Var nullAnn . Qualified Nothing $ Ident arg))
                              vals args
 
+-------------------------------------------------------------------------------------------------
+fnToLambda :: Cpp -> Cpp
+-------------------------------------------------------------------------------------------------
+fnToLambda (CppFunction name args _ qs body) =
+  CppVariableIntroduction
+      (name, Just $ CppAny [CppConst])
+      (filter (==CppStatic) qs)
+      (Just $ CppLambda cs args (Just $ CppAny []) body)
+  where
+  cs | (not . null) (qs `intersect` [CppInline, CppStatic]) = []
+     | otherwise = [CppCaptureAll]
+fnToLambda (CppComment com cpp) = CppComment com (fnToLambda cpp)
+fnToLambda _ = error "Not a function!"
+
 ---------------------------------------------------------------------------------------------------
 arity :: T.Type -> Int
 ---------------------------------------------------------------------------------------------------
@@ -847,6 +873,35 @@ arity = go 0
   go arity' (T.TypeApp (T.TypeApp fn _) t) | fn == E.tyFunction = go (arity' + 1) t
   go arity' (T.ConstrainedType ts t) = go (arity' + length ts) t
   go arity' _ = arity'
+
+---------------------------------------------------------------------------------------------------
+normalizeArity :: Maybe Int -> Cpp -> Cpp
+---------------------------------------------------------------------------------------------------
+normalizeArity (Just ar) (CppLambda cs params rty body)
+  | ar > 0,
+    length params > ar = CppLambda cs (take ar params) rty (curriedLambda (fst <$> drop ar params) body)
+  -- | length params == ar = cpp
+normalizeArity (Just ar) cpp
+  | ar > 0,
+    isMaybeFn cpp = let paramNames = ('$':) . show <$> [0 .. ar - 1]
+                    in CppLambda
+                           []
+                           ((\p -> (p, Just $ CppAny [CppConst, CppRef])) <$> paramNames)
+                           (Just $ CppAny [])
+                           (asReturnBlock $ foldl (\fn a -> CppApp fn [a]) cpp (CppVar <$> paramNames))
+  where
+  isMaybeFn :: Cpp -> Bool
+  isMaybeFn (CppVar _) = True
+  isMaybeFn (CppAccessor {}) = True
+  isMaybeFn app@(CppApp {}) | (f, _) <- unApp' app [], isMaybeFn f = True
+  isMaybeFn _ = False
+normalizeArity _ cpp = cpp
+
+-------------------------------------------------------------------------------------------------
+unApp' :: Cpp -> [Cpp] -> (Cpp, [Cpp])
+-------------------------------------------------------------------------------------------------
+unApp' (CppApp val args) args' = unApp' val (args ++ args')
+unApp' other args' = (other, args')
 
 ---------------------------------------------------------------------------------------------------
 extractConstraints :: T.Type -> [T.Constraint]
