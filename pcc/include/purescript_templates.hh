@@ -49,86 +49,19 @@ namespace PureScript {
   template <typename T, typename... Args>
   using std_function = std::function<T(Args...)>;
 
-  template <size_t N, typename P>
+  template <size_t N, typename P, typename... Args>
+  struct for_parameters;
+
+  template <typename P, typename... Args>
+  struct for_parameters<0, P, Args...> {
+    template <typename T, template <typename, typename...> class U>
+    using make_type = U<T, Args...>;
+  };
+
+  template <size_t N, typename P, typename... Args>
   struct for_parameters {
-  };
-
-  template <typename P>
-  struct for_parameters<0, P> {
     template <typename T, template <typename, typename...> class U>
-    using make_type = U<T>;
-  };
-
-  template <typename P>
-  struct for_parameters<1, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<2, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<3, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<4, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<5, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<6, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<7, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<8, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<9, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<10, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<11, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&>;
-  };
-
-  template <typename P>
-  struct for_parameters<12, P> {
-    template <typename T, template <typename, typename...> class U>
-    using make_type = U<T, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&>;
+    using make_type = typename for_parameters<N-1, P, const P&, Args...>::template make_type<T,U>;
   };
 
 }
