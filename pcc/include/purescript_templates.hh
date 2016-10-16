@@ -26,23 +26,21 @@
   M(7) \
   M(8) \
   M(9) \
-  M(10) \
-  M(11) \
-  M(12)
+  M(10)
 
-#define PARAMS_FOR_ARITY_0(P)
-#define PARAMS_FOR_ARITY_1(P)  const P&
-#define PARAMS_FOR_ARITY_2(P)  const P&, const P&
-#define PARAMS_FOR_ARITY_3(P)  const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_4(P)  const P&, const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_5(P)  const P&, const P&, const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_6(P)  const P&, const P&, const P&, const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_7(P)  const P&, const P&, const P&, const P&, const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_8(P)  const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_9(P)  const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_10(P) const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_11(P) const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&
-#define PARAMS_FOR_ARITY_12(P) const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&, const P&
+#define REPLICATE(N, P) _PS_REPLICATE_ ## N (P)
+
+#define _PS_REPLICATE_0(P)
+#define _PS_REPLICATE_1(P)  P
+#define _PS_REPLICATE_2(P)  P, P
+#define _PS_REPLICATE_3(P)  P, P, P
+#define _PS_REPLICATE_4(P)  P, P, P, P
+#define _PS_REPLICATE_5(P)  P, P, P, P, P
+#define _PS_REPLICATE_6(P)  P, P, P, P, P, P
+#define _PS_REPLICATE_7(P)  P, P, P, P, P, P, P
+#define _PS_REPLICATE_8(P)  P, P, P, P, P, P, P, P
+#define _PS_REPLICATE_9(P)  P, P, P, P, P, P, P, P, P
+#define _PS_REPLICATE_10(P) P, P, P, P, P, P, P, P, P, P
 
 namespace PureScript {
 

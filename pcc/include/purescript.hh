@@ -94,17 +94,13 @@ class any {
   private:
   class closure {
     public:
-
       #define VIRTUAL_CALL_OPERATOR(...) \
       virtual auto operator()(__VA_ARGS__) const -> any { \
         assert(false && "Wrong function arity"); \
         return nullptr; \
       }
-
-      #define MAKE_VIRTUAL_CALL_OPERATOR(N) VIRTUAL_CALL_OPERATOR(PARAMS_FOR_ARITY_ ## N (any))
-
+      #define MAKE_VIRTUAL_CALL_OPERATOR(N) VIRTUAL_CALL_OPERATOR(REPLICATE(N, const any&))
       ALL_VERSIONS(MAKE_VIRTUAL_CALL_OPERATOR)
-
       virtual ~closure() {}
   };
 
@@ -114,8 +110,8 @@ class any {
   public:
     _closure(const T& l) noexcept : lambda(l) {}
 
-    auto operator()(Args&&... args) const -> any override {
-      return lambda(std::forward<Args>(args)...);
+    auto operator()(const Args&... args) const -> any override {
+      return lambda(args...);
     }
   };
 
@@ -429,13 +425,15 @@ inline auto cast(const any& a) ->
 
 } // namespace PureScript
 
-#undef WITH_ALLOCATOR
-#undef IS_POINTER_TYPE
-#undef DEFINE_OPERATOR
+#undef ALL_VERSIONS
 #undef DECLARE_COMPARISON_OPERATOR
-#undef MAKE_FUNCTION_CTOR
+#undef DEFINE_OPERATOR
+#undef IS_POINTER_TYPE
 #undef MAKE_CLOSURE_CTOR
-#undef VIRTUAL_CALL_OPERATOR
+#undef MAKE_FUNCTION_CTOR
 #undef MAKE_VIRTUAL_CALL_OPERATOR
+#undef REPLICATE
+#undef VIRTUAL_CALL_OPERATOR
+#undef WITH_ALLOCATOR
 
 #endif // PureScript_HH
