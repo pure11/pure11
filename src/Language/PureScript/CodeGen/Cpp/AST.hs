@@ -220,6 +220,10 @@ data Cpp
   --
   | CppSymbol Text
   -- |
+  -- Define unique system-wide name/constant
+  --
+  | CppDefineSymbol Text
+  -- |
   -- |
   -- A block of expressions in braces
   --

@@ -36,7 +36,6 @@ import Control.Applicative
 import Control.Arrow ((<+>))
 import qualified Control.Arrow as A
 import Control.Monad.State
-import Numeric (showHex)
 import Control.PatternArrows
 
 import Language.PureScript.CodeGen.Cpp.AST
@@ -244,7 +243,8 @@ literals = mkPattern' match
   match (CppVar ident)
     | ident == C.__unused = match (CppVar $ '$' `T.cons` ident)
   match (CppVar ident) = return ident
-  match (CppSymbol ident) = return $ "SYMBOL" <> parensT (symbolname ident)
+  match (CppSymbol ident) = return $ "symbol" <> parensT (symbolname ident)
+  match (CppDefineSymbol ident) = return $ "define_symbol" <> parensT (symbolname ident)
   match (CppApp v [CppNoOp]) = return (prettyPrintCpp1 v)
   match (CppVariableIntroduction (ident, typ) qs value)
     | ident == C.__unused = match (CppVariableIntroduction ('$' `T.cons` ident, typ) qs value)
@@ -363,16 +363,7 @@ string s = "\"" <> T.concatMap encodeChar s <> "\""
   encodeChar '\r' = "\\r"
   encodeChar '"'  = "\\\""
   encodeChar '\\' = "\\\\"
-  -- PureScript strings are sequences of UTF-16 code units, so this case should never be hit.
-  -- If it is somehow hit, though, output the designated Unicode replacement character U+FFFD.
-  encodeChar c | fromEnum c > 0xFFFF = "\\uFFFD"
-  encodeChar c | fromEnum c > 0xFFF = "\\u" <> showHex' (fromEnum c) ""
-  encodeChar c | fromEnum c > 0xFF = "\\u0" <> showHex' (fromEnum c) ""
-  encodeChar c | fromEnum c < 0x10 = "\\x0" <> showHex' (fromEnum c) ""
-  encodeChar c | fromEnum c > 0x7E || fromEnum c < 0x20 = "\\x" <> showHex' (fromEnum c) ""
   encodeChar c = T.singleton c
-
-  showHex' a b = T.pack (showHex a b)
 
 accessor :: Pattern PrinterState Cpp (Text, Cpp)
 accessor = mkPattern match

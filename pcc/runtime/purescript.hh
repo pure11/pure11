@@ -46,17 +46,21 @@ namespace PureScript {
 using cstring = const char *;
 using std::nullptr_t;
 
-struct symbol_generator_anchor {};
-using symbol_t = const symbol_generator_anchor *;
+namespace Private {
+  struct symbol_generator_anchor_t {};
 
-template <typename T>
-struct symbol_generator {
-  constexpr static symbol_generator_anchor anchor = symbol_generator_anchor{};
-};
-template <typename T>
-constexpr symbol_generator_anchor symbol_generator<T>::anchor;
+  template <typename T>
+  struct symbol_generator {
+    constexpr static symbol_generator_anchor_t anchor = symbol_generator_anchor_t{};
+  };
+  template <typename T>
+  constexpr symbol_generator_anchor_t symbol_generator<T>::anchor;
+}
 
-#define SYMBOL(S) &symbol_generator<symbol::S>::anchor
+using symbol_t = const Private::symbol_generator_anchor_t *;
+
+#define define_symbol(S) namespace PureScript { namespace Symbols { struct Sym_ ## S {}; } }
+#define symbol(S) (&Private::symbol_generator<::PureScript::Symbols::Sym_ ## S>::anchor)
 
 // Workaround for missing C++11 version in gcc
 class runtime_error : public std::runtime_error {
@@ -123,10 +127,10 @@ class any {
   };
 
   template <typename T>
-  class _closure : public closure {
+  class closure_ : public closure {
     const T lambda;
   public:
-    _closure(const T& l) noexcept : lambda(l) {}
+    closure_(const T& l) noexcept : lambda(l) {}
     auto operator()(const any& arg) const -> any override {
       return lambda(arg);
     }
@@ -139,10 +143,10 @@ class any {
   };
 
   template <typename T>
-  class _eff_closure : public eff_closure {
+  class eff_closure_ : public eff_closure {
     const T lambda;
   public:
-    _eff_closure(const T& l) noexcept : lambda(l) {}
+    eff_closure_(const T& l) noexcept : lambda(l) {}
     auto operator()() const -> any override {
       return lambda();
     }
@@ -206,7 +210,7 @@ class any {
   template <typename T, typename = typename std::enable_if<!std::is_same<any,T>::value &&
                                                            !std::is_convertible<T,fn>::value>::type>
   any(const T& val, typename std::enable_if<std::is_assignable<std::function<any(const any&)>,T>::value>::type* = 0)
-    : tag(tag_t::Closure), l(make_managed<_closure<T>>(val)) {}
+    : tag(tag_t::Closure), l(make_managed<closure_<T>>(val)) {}
 
   template <typename T>
   any(const T& val, typename std::enable_if<std::is_convertible<T,eff_fn>::value>::type* = 0) noexcept
@@ -216,7 +220,7 @@ class any {
             typename = typename std::enable_if<!std::is_same<any,T>::value &&
                                                !std::is_convertible<T,eff_fn>::value>::type>
   any(const T& val, typename std::enable_if<std::is_assignable<std::function<any()>,T>::value>::type* = 0)
-    : tag(tag_t::EffClosure), k(make_managed<_eff_closure<T>>(val)) {}
+    : tag(tag_t::EffClosure), k(make_managed<eff_closure_<T>>(val)) {}
 
   template <typename T>
   any(const T& val, typename std::enable_if<std::is_convertible<T,thunk>::value>::type* = 0) noexcept
@@ -411,23 +415,25 @@ class any {
 
 }; // class any
 
-template <typename T, typename U=void>
-struct tag_helper {};
+namespace Private {
+  template <typename T, typename U=void>
+  struct tag_helper_t {};
 
-template <size_t N>
-struct tag_helper<any::map<N>> {
-  static constexpr any::tag_t tag = any::tag_t::Map;
-};
+  template <size_t N>
+  struct tag_helper_t<any::map<N>> {
+    static constexpr any::tag_t tag = any::tag_t::Map;
+  };
 
-template <size_t N>
-struct tag_helper<any::data<N>> {
-  static constexpr any::tag_t tag = any::tag_t::Data;
-};
+  template <size_t N>
+  struct tag_helper_t<any::data<N>> {
+    static constexpr any::tag_t tag = any::tag_t::Data;
+  };
 
-template <typename T>
-struct tag_helper<T> {
-  static constexpr any::tag_t tag = any::tag_t::Pointer;
-};
+  template <typename T>
+  struct tag_helper_t<T> {
+    static constexpr any::tag_t tag = any::tag_t::Pointer;
+  };
+}
 
 template <typename T>
 inline auto cast(const any& a) ->
@@ -445,7 +451,7 @@ inline auto cast(const any& a) ->
 template <typename T, typename = typename std::enable_if<std::is_class<T>::value>::type>
 inline auto cast(const any& a) ->
     typename std::enable_if<!std::is_same<T, any::array>::value, T&>::type {
-  return *static_cast<T*>(a.extractPointer(IF_DEBUG(tag_helper<T>::tag)));
+  return *static_cast<T*>(a.extractPointer(IF_DEBUG(Private::tag_helper_t<T>::tag)));
 }
 
 template <typename T>

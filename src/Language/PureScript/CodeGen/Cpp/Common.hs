@@ -18,12 +18,12 @@
 
 module Language.PureScript.CodeGen.Cpp.Common where
 
-import Prelude.Compat hiding (all, concatMap, last, init)
+import Prelude.Compat hiding (all, concatMap, last, init, null)
 
 import Data.Char
 import Data.Text hiding (map)
 import Data.Monoid ((<>))
-import qualified Data.Text as T
+import qualified Language.PureScript.Constants as C
 import Language.PureScript.Crash
 import Language.PureScript.Names
 
@@ -32,17 +32,35 @@ import Language.PureScript.Names
 --
 --  * Alphanumeric characters are kept unmodified.
 --
---  * Reserved C++11 identifiers are wrapped with '_'
+--  * Reserved C++11 identifiers are suffixed with a '$'
 --
---  * Symbols are wrapped with '_' between a symbol name or their ordinal value.
+--  * Symbols are prefixed with "$0" plus their ordinal value.
 --
 identToCpp :: Ident -> Text
-identToCpp (Ident name) | nameIsCppReserved name = "_" <> name <> "_"
+identToCpp (Ident name)
+  | nameIsCppReserved name = name <> "$"
 identToCpp (Ident name)
   | Just ('$', s) <- uncons name
   , all isDigit s = name
-identToCpp (Ident name) = concatMap identCharToString name
+identToCpp (Ident name)
+  | name == C.__unused = name
+identToCpp (Ident name)
+  | "_" `isPrefixOf` name = "$" <> escaped name
+identToCpp (Ident name) = escaped name
 identToCpp (GenIdent _ _) = internalError "GenIdent in identToCpp"
+
+escaped :: Text -> Text
+escaped = escapeDoubleUnderscores . concatMap identCharToText
+
+-- |
+-- C++ actually reserves all identifiers containing double
+-- underscores.
+--
+escapeDoubleUnderscores :: Text -> Text
+escapeDoubleUnderscores = replace "__" "_$_"
+
+unescapeDoubleUnderscores :: Text -> Text
+unescapeDoubleUnderscores = replace "_$_" "__"
 
 -- |
 -- Test if a string is a valid Cpp identifier without escaping.
@@ -54,12 +72,31 @@ identNeedsEscaping s = s /= identToCpp (Ident s)
 -- Attempts to find a human-readable name for a symbol, if none has been specified returns the
 -- ordinal value.
 --
-identCharToString :: Char -> Text
-identCharToString c | isAlphaNum c = singleton c
-identCharToString '_' = "_"
-identCharToString '.' = "_"
-identCharToString '\'' = "_prime"
-identCharToString c = "$0" <> (pack . show $ ord c)
+identCharToText :: Char -> Text
+identCharToText c | isAlphaNum c = singleton c
+identCharToText '_' = "_"
+identCharToText '.' = "$dot"
+identCharToText '$' = "$dollar"
+identCharToText '~' = "$tilde"
+identCharToText '=' = "$eq"
+identCharToText '<' = "$less"
+identCharToText '>' = "$greater"
+identCharToText '!' = "$bang"
+identCharToText '#' = "$hash"
+identCharToText '%' = "$percent"
+identCharToText '^' = "$up"
+identCharToText '&' = "$amp"
+identCharToText '|' = "$bar"
+identCharToText '*' = "$times"
+identCharToText '/' = "$div"
+identCharToText '+' = "$plus"
+identCharToText '-' = "$minus"
+identCharToText ':' = "$colon"
+identCharToText '\\' = "$bslash"
+identCharToText '?' = "$qmark"
+identCharToText '@' = "$at"
+identCharToText '\'' = "$prime"
+identCharToText c = "$0" <> (pack . show $ ord c)
 
 -- |
 -- Checks whether an identifier name is reserved in C++11.
@@ -73,6 +110,9 @@ nameIsCppReserved name =
               , "any"
               , "asm"
               , "assert"
+              , "atomic_cancel"
+              , "atomic_commit"
+              , "atomic_noexcept"
               , "auto"
               , "bitand"
               , "bitor"
@@ -92,9 +132,12 @@ nameIsCppReserved name =
               , "constexpr"
               , "const_cast"
               , "continue"
+              , "concept"
               , "constructor"
+              , "cstring"
               , "decltype"
               , "default"
+              , "define_symbol"
               , "delete"
               , "do"
               , "double"
@@ -117,6 +160,9 @@ nameIsCppReserved name =
               , "int"
               , "list"
               , "long"
+              , "make_managed"
+              , "make_managed_and_finalized"
+              , "managed"
               , "mutable"
               , "namespace"
               , "new"
@@ -132,17 +178,14 @@ nameIsCppReserved name =
               , "or"
               , "or_eq"
               , "override"
-              , "param"
               , "private"
               , "protected"
               , "public"
-              , "PureScript"
               , "register"
               , "reinterpret_cast"
               , "requires"
               , "return"
               , "runtime_error"
-              , "shared_list"
               , "short"
               , "signed"
               , "sizeof"
@@ -154,7 +197,10 @@ nameIsCppReserved name =
               , "struct"
               , "switch"
               , "symbol"
+              , "symbol_t"
+              , "synchronized"
               , "template"
+              , "the_value"
               , "this"
               , "thread_local"
               , "throw"
@@ -164,6 +210,7 @@ nameIsCppReserved name =
               , "typeid"
               , "typename"
               , "typeof"
+              , "undefined"
               , "union"
               , "unknown_size"
               , "unsigned"
@@ -177,17 +224,20 @@ nameIsCppReserved name =
               , "xor_eq" ] || properNameIsCppReserved name
 
 normalizedName :: Text -> Text
-normalizedName name
-  | Just ('_', s) <- uncons name
-  , last s == '_'
-  , s' <- init s
-  , nameIsCppReserved s' = s'
-normalizedName s = s
+normalizedName = unescapeDoubleUnderscores . normalizedName'
+  where
+  normalizedName' name
+    | null name = ""
+  normalizedName' name
+    | last name == '$' = init name
+  normalizedName' name
+    | Just ('$', s) <- uncons name = s
+  normalizedName' s = s
 
 moduleNameToCpp :: ModuleName -> Text
 moduleNameToCpp (ModuleName pns) =
-  let name = T.intercalate "_" (runProperName `map` pns)
-  in if properNameIsCppReserved name then "_" <> name <> "_" else name
+  let name = intercalate "_" (runProperName `map` pns)
+  in if properNameIsCppReserved name then name <> "$" else name
 
 -- |
 -- Checks whether a proper name is reserved in C++11.
@@ -195,4 +245,6 @@ moduleNameToCpp (ModuleName pns) =
 properNameIsCppReserved :: Text -> Bool
 properNameIsCppReserved name =
   name `elem` [ "Private"
-              , "PureScript" ]
+              , "PureScript"
+              , "Symbols"
+              ]

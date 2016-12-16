@@ -110,7 +110,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
       symbols = allSymbols bodyCpps
       moduleBody =
         CppInclude (runModuleName mn) (runModuleName mn) :
-        symbolDefs symbols :
+        (CppDefineSymbol <$> symbols) ++
         (if null bodyCpps
            then []
            else [ CppNamespace (runModuleName mn) $
@@ -901,17 +901,8 @@ allSymbols :: [Cpp] -> [Text]
 allSymbols cpps = nub $ concatMap (everythingOnCpp (++) symbols) cpps
   where
   symbols :: Cpp -> [Text]
-  symbols (CppSymbol s) = [symbolname s]
+  symbols (CppSymbol s) = [s]
   symbols _ = []
-
----------------------------------------------------------------------------------------------------
-symbolDefs :: [Text] -> Cpp
----------------------------------------------------------------------------------------------------
-symbolDefs [] = CppNoOp
-symbolDefs syms = CppNamespace "PureScript" [CppNamespace "symbol" (asStruct <$> syms)]
-  where
-  asStruct :: Text -> Cpp
-  asStruct s = CppStruct s []
 
 ---------------------------------------------------------------------------------------------------
 filterInlineFuncs :: Cpp -> Cpp
