@@ -235,7 +235,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
     isAccessor Accessor {} = True
     isAccessor _ = False
     isGet :: Cpp -> Bool
-    isGet (CppGet (CppSymbol _) (CppVar _)) = True
+    isGet (CppMapGet (CppSymbol _) (CppVar _)) = True
     isGet _ = False
     classes =
       zip
@@ -387,13 +387,12 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
     accessed dictname name =
       ( name
       , CppApp
-          (CppIndexer
+          (CppDataGet
              (CppNumericLiteral . Left . fromIntegral . fromJust $ findIndex ((== name) . fst) fns)
-             dict'')
+             dict')
           [dict'])
       where
       dict' = CppVar dictname
-      dict'' = CppCast (dataType 1) dict'
     accessor :: Text -> (Text, Cpp) -> Cpp
     accessor dictname (name, _) =
       CppVariableIntroduction (name, Just $ Any [Const]) [] (Just . snd $ accessed dictname name)
@@ -444,13 +443,13 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
   valueToCpp (Literal _ (ObjectLiteral ps)) =
     CppMapLiteral Record <$>
     mapM (sndM valueToCpp) ((\(k, v) -> (CppSymbol k, v)) <$> sortBy (compare `on` fst) ps)
-  valueToCpp (Accessor _ prop val) = CppGet <$> pure (CppSymbol prop) <*> valueToCpp val
+  valueToCpp (Accessor _ prop val) = CppMapGet <$> pure (CppSymbol prop) <*> valueToCpp val
   -- TODO: use a more efficient way of copying/updating the map?
   valueToCpp (ObjectUpdate (_, _, Just ty, _) obj ps) = do
     obj' <- valueToCpp obj
     updatedFields <- mapM (sndM valueToCpp) ps
     let origKeys = (allKeys ty) \\ (fst <$> updatedFields)
-        origFields = (\key -> (key, CppGet (CppSymbol key) obj')) <$> origKeys
+        origFields = (\key -> (key, CppMapGet (CppSymbol key) obj')) <$> origKeys
     return $
       CppMapLiteral Record $
       (\(k, v) -> (CppSymbol k, v)) <$> sortBy (compare `on` fst) (origFields ++ updatedFields)
@@ -603,7 +602,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
           [ CppIfElse
               (CppBinary
                  EqualTo
-                 (CppIndexer (CppVar ctorKey) (CppCast (dataType 1) $ CppVar varName))
+                 (CppDataGet (CppVar ctorIdKey) (CppVar varName))
                  ctorCpp)
               (CppBlock cpps)
               Nothing
@@ -620,9 +619,9 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
           (argVar, Nothing)
           []
           (Just $
-           CppIndexer
+           CppDataGet
              (fieldToIndex' field)
-             (CppCast (dataType $ fieldToIndex field + 1) $ CppVar varName)) :
+             (CppVar varName)) :
         cpps
     fieldToIndex :: Ident -> Int
     fieldToIndex = (+ 1) . read . dropWhile isLetter . unpack . runIdent
@@ -678,7 +677,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
         CppVariableIntroduction
           (propVar, Nothing)
           []
-          (Just $ CppGet (CppSymbol prop) (CppVar varName)) :
+          (Just $ CppMapGet (CppSymbol prop) (CppVar varName)) :
         cpp
   literalToBinderCpp varName done (ArrayLiteral bs) = do
     cpp <- go done 0 bs
@@ -840,10 +839,10 @@ optIndexers :: [(Cpp, Cpp)] -> Cpp -> Cpp
 optIndexers classes = everywhereOnCpp dictIndexerToEnum
   where
   dictIndexerToEnum :: Cpp -> Cpp
-  dictIndexerToEnum (CppGet (CppSymbol prop) dict)
+  dictIndexerToEnum (CppMapGet (CppSymbol prop) dict)
     | Just cls <- lookup dict classes =
       let index = CppAccessor (CppVar . identToCpp $ Ident prop) cls
-      in CppGet index dict
+      in CppMapGet index dict
   dictIndexerToEnum cpp = cpp
 
 ---------------------------------------------------------------------------------------------------

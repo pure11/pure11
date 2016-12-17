@@ -69,7 +69,6 @@ public:
 };
 
 constexpr bool undefined = false;
-constexpr size_t constructor = 0;
 
 // Not a real limit, just used for simpler accessors
 static constexpr size_t unknown_size = 64;
@@ -435,6 +434,12 @@ namespace Private {
   };
 }
 
+// Pass-through
+template <typename T>
+constexpr auto cast(const T& a) -> const T& {
+  return a;
+}
+
 template <typename T>
 inline auto cast(const any& a) ->
     typename std::enable_if<std::is_arithmetic<T>::value ||
@@ -460,14 +465,20 @@ inline auto cast(const any& a) ->
   return a.rawPointer();
 }
 
+template <size_t N, typename T>
+inline auto map_get(const T& a) ->
+    typename std::enable_if<!std::is_same<any, T>::value, const any&>::type {
+  return a[N].second;
+}
+
 template <size_t N>
-inline auto get(const any& a) -> const any& {
+inline auto map_get(const any& a) -> const any& {
   return cast<any::map<N+1>>(a)[N].second;
 }
 
 template <size_t N>
-inline auto get(const symbol_t key, const any::map<N>& a) -> const any& {
-  static_assert(N > 0, "map size must be greater than zero"); // TODO: not safe
+inline auto map_get(const symbol_t key, const any::map<N>& a) -> const any& {
+  static_assert(N > 0, "map size must be greater than zero");
   typename std::remove_reference<decltype(a)>::type::size_type i = 0;
   do {
     if (a[i].first == key) {
@@ -479,8 +490,21 @@ inline auto get(const symbol_t key, const any::map<N>& a) -> const any& {
   return invalid_key;
 }
 
-inline auto get(const symbol_t key, const any& a) -> const any& {
-  return get(key, cast<any::map<unknown_size>>(a));
+inline auto map_get(const symbol_t key, const any& a) -> const any& {
+  return map_get(key, cast<any::map<unknown_size>>(a));
+}
+
+constexpr any::data<1>::size_type ctor_id = 0;
+
+template <size_t N, typename T>
+inline auto data_get(const T& a) ->
+    typename std::enable_if<!std::is_same<any, T>::value, const any&>::type {
+  return a[N];
+}
+
+template <size_t N>
+inline auto data_get(const any& a) -> const any& {
+  return cast<any::data<N+1>>(a)[N];
 }
 
 } // namespace PureScript

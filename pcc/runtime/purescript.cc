@@ -87,7 +87,7 @@ auto any::unthunkVariant(const any& a) -> const any& {
 }
 
 auto any::operator[](const symbol_t key) const -> const any& {
-  return get(key, cast<map<unknown_size>>(*this));
+  return map_get(key, cast<map<unknown_size>>(*this));
 }
 
 auto any::operator[](const size_t rhs) const -> const any& {

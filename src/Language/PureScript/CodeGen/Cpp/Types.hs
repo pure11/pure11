@@ -147,8 +147,8 @@ arrayType = Primitive "any::array"
 thunkMarkerType :: CppType
 thunkMarkerType = Primitive "any::as_thunk"
 
-ctorKey :: Text
-ctorKey = "constructor"
+ctorIdKey :: Text
+ctorIdKey = "ctor_id"
 
 constAnyRef :: Maybe CppType
 constAnyRef = Just $ Any [Const, Ref]
