@@ -80,7 +80,7 @@ removeFromBlock _  cpp = cpp
 
 isFn :: (Text, Text) -> Cpp -> Bool
 isFn (moduleName, fnName) (CppAccessor (CppVar x) (CppVar y)) =
-  (x == fnName || x == ('$' `cons` fnName)) && y == moduleName
+  (x == fnName || x == ('*' `cons` fnName)) && y == moduleName
 isFn (moduleName, fnName) (CppIndexer (CppStringLiteral x) (CppVar y)) =
   x == fnName && y == moduleName
 isFn _ _ = False

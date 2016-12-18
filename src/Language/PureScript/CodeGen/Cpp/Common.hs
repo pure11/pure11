@@ -37,17 +37,18 @@ import Language.PureScript.Names
 --  * Symbols are prefixed with "$0" plus their ordinal value.
 --
 identToCpp :: Ident -> Text
-identToCpp (Ident name)
+identToCpp (Ident name) = safeName name
+identToCpp (GenIdent _ _) = internalError "GenIdent in identToCpp"
+
+safeName :: Text -> Text
+safeName name
   | nameIsCppReserved name = name <> "$"
-identToCpp (Ident name)
+safeName name
   | Just ('$', s) <- uncons name
   , all isDigit s = name
-identToCpp (Ident name)
-  | name == C.__unused = name
-identToCpp (Ident name)
+safeName name
   | "_" `isPrefixOf` name = "$" <> escaped name
-identToCpp (Ident name) = escaped name
-identToCpp (GenIdent _ _) = internalError "GenIdent in identToCpp"
+safeName name = escaped name
 
 escaped :: Text -> Text
 escaped = escapeDoubleUnderscores . concatMap identCharToText
@@ -66,7 +67,7 @@ unescapeDoubleUnderscores = replace "_$_" "__"
 -- Test if a string is a valid Cpp identifier without escaping.
 --
 identNeedsEscaping :: Text -> Bool
-identNeedsEscaping s = s /= identToCpp (Ident s)
+identNeedsEscaping s = s /= safeName s
 
 -- |
 -- Attempts to find a human-readable name for a symbol, if none has been specified returns the

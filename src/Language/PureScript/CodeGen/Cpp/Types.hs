@@ -152,6 +152,3 @@ ctorIdKey = "ctor_id"
 
 constAnyRef :: Maybe CppType
 constAnyRef = Just $ Any [Const, Ref]
-
-symbolname :: Text -> Text
-symbolname = identToCpp . Ident

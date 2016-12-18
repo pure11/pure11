@@ -628,7 +628,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
     fieldToIndex' :: Ident -> Cpp
     fieldToIndex' = CppNumericLiteral . Left . toInteger . fieldToIndex
     ctor' :: Cpp
-    ctor' = CppAccessor (CppVar . identToCpp $ Ident ctor) (CppVar "data")
+    ctor' = CppAccessor (CppVar $ safeName ctor) (CppVar "data")
     ctorCpp :: Cpp
     ctorCpp
       | Just mn'' <- mn'
@@ -760,7 +760,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
     where
     modCtor :: Qualified (ProperName a) -> Maybe Text
     modCtor (Qualified (Just mn') (ProperName name))
-      | mn' == mn = Just $ identToCpp (Ident name)
+      | mn' == mn = Just (safeName name)
     modCtor _ = Nothing
   -------------------------------------------------------------------------------------------------
   curriedForeigns :: m [Cpp]
@@ -841,7 +841,7 @@ optIndexers classes = everywhereOnCpp dictIndexerToEnum
   dictIndexerToEnum :: Cpp -> Cpp
   dictIndexerToEnum (CppMapGet (CppSymbol prop) dict)
     | Just cls <- lookup dict classes =
-      let index = CppAccessor (CppVar . identToCpp $ Ident prop) cls
+      let index = CppAccessor (CppVar $ safeName prop) cls
       in CppMapGet index dict
   dictIndexerToEnum cpp = cpp
 
@@ -851,8 +851,8 @@ curriedName :: Text -> Text
 curriedName name
   | Text.null name = name
 curriedName name
-  | Text.head name == '$' = name
-  | otherwise = '$' `Text.cons` name
+  | Text.head name == '*' = name
+  | otherwise = '*' `Text.cons` name
 
 ---------------------------------------------------------------------------------------------------
 curriedName' :: Cpp -> Cpp
@@ -888,7 +888,7 @@ convertIfPrimFn :: Maybe T.Type -> Cpp -> Cpp
 convertIfPrimFn ty@(Just _) (CppNamespace ns fs) = CppNamespace ns (convertIfPrimFn ty <$> fs)
 convertIfPrimFn (Just _) cpp@(CppFunction name _ _ _ _)
   | not $ Text.null name
-  , Text.head name == '$' = cpp
+  , Text.head name == '*' = cpp
 convertIfPrimFn (Just ty) (CppFunction name params _ qs body)
   | (tys', Just rty') <- primFn ty =
     CppFunction name (zipWith (\(p, _) t -> (p, Just t)) params tys') (Just rty') qs body
