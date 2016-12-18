@@ -100,6 +100,14 @@ auto any::operator[](const any& rhs) const -> const any& {
   return xs[cast<int>(rhs)];
 }
 
+auto any::size() const -> size_t {
+  return cast<array>(*this).size();
+}
+
+auto any::empty() const -> bool {
+  return cast<array>(*this).empty();
+}
+
 auto any::contains(const symbol_t key) const -> bool {
   // TODO: assumes at least one element -- safe assumption?
   const auto& m = cast<map<unknown_size>>(*this);

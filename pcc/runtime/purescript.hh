@@ -343,6 +343,8 @@ class any {
   auto operator[](const size_t) const -> const any&;
   auto operator[](const any&) const -> const any&;
 
+  auto size() const -> size_t;
+  auto empty() const -> bool;
   auto contains(const symbol_t) const -> bool;
 
   auto extractPointer(IF_DEBUG(const tag_t)) const -> void*;

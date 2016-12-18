@@ -683,12 +683,10 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
     cpp <- go done 0 bs
     let cond =
           case length bs of
-            0 -> CppBinary Dot (CppCast arrayType $ CppVar varName) (CppApp (CppVar "empty") [])
-            n ->
-              let var = CppCast arrayType $ CppVar varName
-              in CppBinary
+            0 -> CppBinary Dot (CppVar varName) (CppApp (CppVar "empty") [])
+            n -> CppBinary
                    EqualTo
-                   (CppBinary Dot var (CppApp (CppVar "size") []))
+                   (CppBinary Dot (CppVar varName) (CppApp (CppVar "size") []))
                    (CppNumericLiteral (Left (fromIntegral n)))
     return [CppIfElse cond (CppBlock cpp) Nothing]
     where
