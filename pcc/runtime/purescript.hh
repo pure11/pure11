@@ -59,8 +59,14 @@ namespace Private {
 
 using symbol_t = const Private::symbol_generator_anchor_t *;
 
-#define define_symbol(S) namespace PureScript { namespace Symbols { struct Sym_ ## S {}; } }
-#define symbol(S) (&Private::symbol_generator<::PureScript::Symbols::Sym_ ## S>::anchor)
+#define define_symbol(S) namespace PureScript { \
+                           namespace Private { \
+                             namespace Symbol { \
+                               struct S_ ## S {}; \
+                             } \
+                           } \
+                         }
+#define symbol(S) (&Private::symbol_generator<::PureScript::Private::Symbol::S_ ## S>::anchor)
 
 // Workaround for missing C++11 version in gcc
 class runtime_error : public std::runtime_error {
@@ -467,46 +473,53 @@ inline auto cast(const any& a) ->
   return a.rawPointer();
 }
 
-template <size_t N, typename T>
-inline auto map_get(const T& a) ->
-    typename std::enable_if<!std::is_same<any, T>::value, const any&>::type {
-  return a[N].second;
+namespace map {
+  template <size_t N, typename T>
+  inline auto get(const T& a) ->
+      typename std::enable_if<!std::is_same<any, T>::value, const any&>::type {
+    return a[N].second;
+  }
+
+  template <size_t N>
+  inline auto get(const any& a) -> const any& {
+    return cast<any::map<N+1>>(a)[N].second;
+  }
+
+  template <size_t N>
+  inline auto get(const symbol_t key, const any::map<N>& a) -> const any& {
+    static_assert(N > 0, "map size must be greater than zero");
+    typename std::remove_reference<decltype(a)>::type::size_type i = 0;
+    do {
+      if (a[i].first == key) {
+        return a[i].second;
+      }
+    } while (a[++i].first != nullptr);
+    assert(false && "map key not found");
+    static const any invalid_key(nullptr);
+    return invalid_key;
+  }
+
+  inline auto get(const symbol_t key, const any& a) -> const any& {
+    return get(key, cast<any::map<unknown_size>>(a));
+  }
 }
 
-template <size_t N>
-inline auto map_get(const any& a) -> const any& {
-  return cast<any::map<N+1>>(a)[N].second;
-}
+namespace data {
+  template <size_t N, typename T>
+  inline auto get(const T& a) ->
+      typename std::enable_if<!std::is_same<any, T>::value, const any&>::type {
+    return a[N];
+  }
 
-template <size_t N>
-inline auto map_get(const symbol_t key, const any::map<N>& a) -> const any& {
-  static_assert(N > 0, "map size must be greater than zero");
-  typename std::remove_reference<decltype(a)>::type::size_type i = 0;
-  do {
-    if (a[i].first == key) {
-      return a[i].second;
-    }
-  } while (a[++i].first != nullptr);
-  assert(false && "map key not found");
-  static const any invalid_key(nullptr);
-  return invalid_key;
-}
+  template <size_t N>
+  inline auto get(const any& a) -> const any& {
+    return cast<any::data<N+1>>(a)[N];
+  }
 
-inline auto map_get(const symbol_t key, const any& a) -> const any& {
-  return map_get(key, cast<any::map<unknown_size>>(a));
-}
-
-constexpr any::data<1>::size_type ctor_id = 0;
-
-template <size_t N, typename T>
-inline auto data_get(const T& a) ->
-    typename std::enable_if<!std::is_same<any, T>::value, const any&>::type {
-  return a[N];
-}
-
-template <size_t N>
-inline auto data_get(const any& a) -> const any& {
-  return cast<any::data<N+1>>(a)[N];
+  template <typename T>
+  inline auto ctor(const T& a) -> const any& {
+    return get<0>(a);
+  }
 }
 
 } // namespace PureScript

@@ -249,7 +249,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
       []
       (Just $ Any [])
       [Inline]
-      (returnBlock $ CppDataLiteral [CppAccessor (CppVar $ identToCpp ident) (CppVar "data")])
+      (returnBlock $ CppDataLiteral [CppAccessor (CppVar $ identToCpp ident) (CppVar ctorNS)])
   declToCpp _ (_, ident) (Constructor _ _ (ProperName _) fields) =
     return . CppNamespace "" $
     [ CppFunction
@@ -258,7 +258,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
         (Just $ Any [])
         [Inline]
         (returnBlock $
-         CppDataLiteral $ CppAccessor (CppVar name) (CppVar "data") : (CppVar <$> fields'))
+         CppDataLiteral $ CppAccessor (CppVar name) (CppVar ctorNS) : (CppVar <$> fields'))
     ] ++
     if length fields > 0
       then [ CppFunction
@@ -602,7 +602,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
           [ CppIfElse
               (CppBinary
                  EqualTo
-                 (CppDataGet (CppVar ctorIdKey) (CppVar varName))
+                 (CppApp (CppVar getCtor) [CppVar varName])
                  ctorCpp)
               (CppBlock cpps)
               Nothing
@@ -628,7 +628,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
     fieldToIndex' :: Ident -> Cpp
     fieldToIndex' = CppNumericLiteral . Left . toInteger . fieldToIndex
     ctor' :: Cpp
-    ctor' = CppAccessor (CppVar $ safeName ctor) (CppVar "data")
+    ctor' = CppAccessor (CppVar $ safeName ctor) (CppVar ctorNS)
     ctorCpp :: Cpp
     ctorCpp
       | Just mn'' <- mn'
@@ -750,7 +750,7 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
   -------------------------------------------------------------------------------------------------
   dataCtors =
     [ CppNamespace
-        "data"
+        ctorNS
         [ CppEnum Nothing (Just intType) . ("_" :) . catMaybes . map modCtor . M.keys $
           E.dataConstructors env
         ]

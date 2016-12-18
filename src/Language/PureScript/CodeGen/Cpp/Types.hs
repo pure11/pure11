@@ -147,8 +147,17 @@ arrayType = Primitive "any::array"
 thunkMarkerType :: CppType
 thunkMarkerType = Primitive "any::as_thunk"
 
-ctorIdKey :: Text
-ctorIdKey = "ctor_id"
+mapNS :: Text
+mapNS = "map"
+
+dataNS :: Text
+dataNS = "data"
+
+ctorNS :: Text
+ctorNS = "ctor"
+
+getCtor :: Text
+getCtor = dataNS <> "::ctor"
 
 constAnyRef :: Maybe CppType
 constAnyRef = Just $ Any [Const, Ref]

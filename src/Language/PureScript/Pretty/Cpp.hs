@@ -238,11 +238,11 @@ literals = mkPattern' match
     val' | "(" `T.isInfixOf` vstr || "[" `T.isInfixOf` vstr = parensT vstr
          | otherwise = vstr
   match (CppMapGet i@(CppSymbol _) val) =
-    return . prettyPrintCpp1 $ CppApp (CppVar "map_get") [i, val]
+    return . prettyPrintCpp1 $ CppApp (CppVar $ mapNS <> "::get") [i, val]
   match (CppMapGet i val) =
-    return . prettyPrintCpp1 $ CppApp (CppVar $ "map_get" <> angles (prettyPrintCpp1 i)) [val]
+    return . prettyPrintCpp1 $ CppApp (CppVar $ mapNS <> "::get" <> angles (prettyPrintCpp1 i)) [val]
   match (CppDataGet i val) =
-    return . prettyPrintCpp1 $ CppApp (CppVar $ "data_get" <> angles (prettyPrintCpp1 i)) [val]
+    return . prettyPrintCpp1 $ CppApp (CppVar $ dataNS <> "::get" <> angles (prettyPrintCpp1 i)) [val]
   match (CppVar ident) = return $ renderName ident
   match (CppSymbol ident) = return $ "symbol" <> parensT (safeName ident)
   match (CppDefineSymbol ident) = return $ "define_symbol" <> parensT (safeName ident)

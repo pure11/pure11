@@ -23,7 +23,6 @@ import Prelude.Compat hiding (all, concatMap, last, init, null)
 import Data.Char
 import Data.Text hiding (map)
 import Data.Monoid ((<>))
-import qualified Language.PureScript.Constants as C
 import Language.PureScript.Crash
 import Language.PureScript.Names
 
@@ -135,8 +134,7 @@ nameIsCppReserved name =
               , "continue"
               , "concept"
               , "cstring"
-              , "ctor_id"
-              , "data_get"
+              , "ctor"
               , "decltype"
               , "default"
               , "define_symbol"
@@ -164,7 +162,6 @@ nameIsCppReserved name =
               , "make_managed"
               , "make_managed_and_finalized"
               , "managed"
-              , "map_get"
               , "mutable"
               , "namespace"
               , "new"
@@ -248,5 +245,4 @@ properNameIsCppReserved :: Text -> Bool
 properNameIsCppReserved name =
   name `elem` [ "Private"
               , "PureScript"
-              , "Symbols"
               ]
