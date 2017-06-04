@@ -66,8 +66,7 @@ prettyPrintValue d (ObjectUpdateNested o ps) = prettyPrintValueAtom (d - 1) o `b
     printNode (key, Leaf val) = prettyPrintUpdateEntry d key val
     printNode (key, Branch val) = textT (prettyPrintObjectKey key) `beforeWithSpace` prettyPrintUpdate val
 prettyPrintValue d (App val arg) = prettyPrintValueAtom (d - 1) val `beforeWithSpace` prettyPrintValueAtom (d - 1) arg
-prettyPrintValue d (Abs (Left arg) val) = text ('\\' : T.unpack (showIdent arg) ++ " -> ") // moveRight 2 (prettyPrintValue (d - 1) val)
-prettyPrintValue d (Abs (Right arg) val) = text ('\\' : T.unpack (prettyPrintBinder arg) ++ " -> ") // moveRight 2 (prettyPrintValue (d - 1) val)
+prettyPrintValue d (Abs arg val) = text ('\\' : T.unpack (prettyPrintBinder arg) ++ " -> ") // moveRight 2 (prettyPrintValue (d - 1) val)
 prettyPrintValue d (TypeClassDictionaryConstructorApp className ps) =
   text (T.unpack (runProperName (disqualify className)) ++ " ") <> prettyPrintValueAtom (d - 1) ps
 prettyPrintValue d (Case values binders) =
@@ -125,12 +124,12 @@ prettyPrintDeclaration :: Int -> Declaration -> Box
 prettyPrintDeclaration d _ | d < 0 = ellipsis
 prettyPrintDeclaration _ (TypeDeclaration ident ty) =
   text (T.unpack (showIdent ident) ++ " :: ") <> typeAsBox ty
-prettyPrintDeclaration d (ValueDeclaration ident _ [] (Right val)) =
+prettyPrintDeclaration d (ValueDeclaration ident _ [] [GuardedExpr [] val]) =
   text (T.unpack (showIdent ident) ++ " = ") <> prettyPrintValue (d - 1) val
 prettyPrintDeclaration d (BindingGroupDeclaration ds) =
   vsep 1 left (map (prettyPrintDeclaration (d - 1) . toDecl) ds)
   where
-  toDecl (nm, t, e) = ValueDeclaration nm t [] (Right e)
+  toDecl (nm, t, e) = ValueDeclaration nm t [] [GuardedExpr [] e]
 prettyPrintDeclaration d (PositionedDeclaration _ _ decl) = prettyPrintDeclaration d decl
 prettyPrintDeclaration _ _ = internalError "Invalid argument to prettyPrintDeclaration"
 
@@ -139,16 +138,35 @@ prettyPrintCaseAlternative d _ | d < 0 = ellipsis
 prettyPrintCaseAlternative d (CaseAlternative binders result) =
   text (T.unpack (T.unwords (map prettyPrintBinderAtom binders))) <> prettyPrintResult result
   where
-  prettyPrintResult :: Either [(Guard, Expr)] Expr -> Box
-  prettyPrintResult (Left gs) =
-    vcat left (map prettyPrintGuardedValue gs)
-  prettyPrintResult (Right v) = text " -> " <> prettyPrintValue (d - 1) v
+  prettyPrintResult :: [GuardedExpr] -> Box
+  prettyPrintResult [GuardedExpr [] v] = text " -> " <> prettyPrintValue (d - 1) v
+  prettyPrintResult gs =
+    vcat left (map (prettyPrintGuardedValueSep (text " | ")) gs)
 
-  prettyPrintGuardedValue :: (Guard, Expr) -> Box
-  prettyPrintGuardedValue (grd, val) = foldl1 before
-    [ text " | "
-    , prettyPrintValue (d - 1) grd
-    , text " -> "
+  prettyPrintGuardedValueSep :: Box -> GuardedExpr -> Box
+  prettyPrintGuardedValueSep _ (GuardedExpr [] val) =
+    text " -> " <> prettyPrintValue (d - 1) val
+
+  prettyPrintGuardedValueSep sep (GuardedExpr [guard] val) =
+    foldl1 before [ sep
+                  , prettyPrintGuard guard
+                  , prettyPrintGuardedValueSep sep (GuardedExpr [] val)
+                  ]
+
+  prettyPrintGuardedValueSep sep (GuardedExpr (guard : guards) val) =
+    vcat left [ foldl1 before
+                [ sep
+                , prettyPrintGuard guard
+                ]
+              , prettyPrintGuardedValueSep (text " , ") (GuardedExpr guards val)
+              ]
+
+  prettyPrintGuard (ConditionGuard cond) =
+    prettyPrintValue (d - 1) cond
+  prettyPrintGuard (PatternGuard binder val) =
+    foldl1 before
+    [ text (T.unpack (prettyPrintBinder binder))
+    , text " <- "
     , prettyPrintValue (d - 1) val
     ]
 

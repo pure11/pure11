@@ -6,6 +6,7 @@ import           Protolude
 import           Control.Lens hiding ((&))
 import           Language.PureScript.Ide.Types
 import           Language.PureScript.Ide.State
+import           Language.PureScript.Ide.Test
 import qualified Language.PureScript as P
 import           Test.Hspec
 import qualified Data.Map as Map
@@ -33,9 +34,6 @@ testModule = (mn "Test", [ d (IdeDeclValue (IdeValue (P.Ident "function") P.REmp
 
 d :: IdeDeclaration -> IdeDeclarationAnn
 d = IdeDeclarationAnn emptyAnn
-
-mn :: Text -> P.ModuleName
-mn = P.moduleNameFromString
 
 testState :: ModuleMap [IdeDeclarationAnn]
 testState = Map.fromList [testModule]
@@ -67,10 +65,12 @@ ef = P.ExternsFile
       mempty
  --     }
     ]
+  --, efSourceSpan =
+    (P.internalModuleSourceSpan "<tests>")
  -- }
 
 moduleMap :: ModuleMap [IdeDeclarationAnn]
-moduleMap = Map.singleton (mn "ClassModule") [d (IdeDeclTypeClass (IdeTypeClass (P.ProperName "MyClass") []))]
+moduleMap = Map.singleton (mn "ClassModule") [ideTypeClass "MyClass" P.kindType []]
 
 ideInstance :: IdeInstance
 ideInstance = IdeInstance (mn "InstanceModule") (P.Ident "myClassInstance") mempty mempty

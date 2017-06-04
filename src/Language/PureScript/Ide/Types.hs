@@ -53,6 +53,7 @@ data IdeType = IdeType
 data IdeTypeSynonym = IdeTypeSynonym
   { _ideSynonymName :: P.ProperName 'P.TypeName
   , _ideSynonymType :: P.Type
+  , _ideSynonymKind :: P.Kind
   } deriving (Show, Eq, Ord)
 
 data IdeDataConstructor = IdeDataConstructor
@@ -63,6 +64,7 @@ data IdeDataConstructor = IdeDataConstructor
 
 data IdeTypeClass = IdeTypeClass
   { _ideTCName :: P.ProperName 'P.ClassName
+  , _ideTCKind :: P.Kind
   , _ideTCInstances :: [IdeInstance]
   } deriving (Show, Eq, Ord)
 
@@ -106,11 +108,12 @@ data IdeDeclarationAnn = IdeDeclarationAnn
 
 data Annotation
   = Annotation
-  { annLocation       :: Maybe P.SourceSpan
-  , annExportedFrom   :: Maybe P.ModuleName
-  , annTypeAnnotation :: Maybe P.Type
+  { _annLocation       :: Maybe P.SourceSpan
+  , _annExportedFrom   :: Maybe P.ModuleName
+  , _annTypeAnnotation :: Maybe P.Type
   } deriving (Show, Eq, Ord)
 
+makeLenses ''Annotation
 makeLenses ''IdeDeclarationAnn
 
 emptyAnn :: Annotation
@@ -184,7 +187,7 @@ data Completion = Completion
   , complExpandedType  :: Text
   , complLocation      :: Maybe P.SourceSpan
   , complDocumentation :: Maybe Text
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Ord)
 
 instance ToJSON Completion where
   toJSON (Completion {..}) =
@@ -195,34 +198,6 @@ instance ToJSON Completion where
            , "definedAt" .= complLocation
            , "documentation" .= complDocumentation
            ]
-
-data ModuleImport =
-  ModuleImport
-  { importModuleName :: ModuleIdent
-  , importType       :: P.ImportDeclarationType
-  , importQualifier  :: Maybe Text
-  } deriving(Show)
-
-instance Eq ModuleImport where
-  mi1 == mi2 =
-    importModuleName mi1 == importModuleName mi2
-    && importQualifier mi1 == importQualifier mi2
-
-instance ToJSON ModuleImport where
-  toJSON (ModuleImport mn P.Implicit qualifier) =
-    object $ [ "module" .= mn
-             , "importType" .= ("implicit" :: Text)
-             ] ++ map (\x -> "qualifier" .= x) (maybeToList qualifier)
-  toJSON (ModuleImport mn (P.Explicit refs) qualifier) =
-    object $ [ "module" .= mn
-             , "importType" .= ("explicit" :: Text)
-             , "identifiers" .= (identifierFromDeclarationRef <$> refs)
-             ] ++ map (\x -> "qualifier" .= x) (maybeToList qualifier)
-  toJSON (ModuleImport mn (P.Hiding refs) qualifier) =
-    object $ [ "module" .= mn
-             , "importType" .= ("hiding" :: Text)
-             , "identifiers" .= (identifierFromDeclarationRef <$> refs)
-             ] ++ map (\x -> "qualifier" .= x) (maybeToList qualifier)
 
 identifierFromDeclarationRef :: P.DeclarationRef -> Text
 identifierFromDeclarationRef (P.TypeRef name _) = P.runProperName name
@@ -238,10 +213,10 @@ data Success =
   | TextResult Text
   | MultilineTextResult [Text]
   | PursuitResult [PursuitResponse]
-  | ImportList [ModuleImport]
+  | ImportList (P.ModuleName, [(P.ModuleName, P.ImportDeclarationType, Maybe P.ModuleName)])
   | ModuleList [ModuleIdent]
-  | RebuildSuccess [P.JSONError]
-  deriving (Show, Eq)
+  | RebuildSuccess P.MultipleErrors
+  deriving (Show)
 
 encodeSuccess :: (ToJSON a) => a -> Value
 encodeSuccess res =
@@ -252,9 +227,28 @@ instance ToJSON Success where
   toJSON (TextResult t) = encodeSuccess t
   toJSON (MultilineTextResult ts) = encodeSuccess ts
   toJSON (PursuitResult resp) = encodeSuccess resp
-  toJSON (ImportList decls) = encodeSuccess decls
+  toJSON (ImportList (moduleName, imports)) = object [ "resultType" .= ("success" :: Text)
+                                                     , "result" .= object [ "imports" .= map encodeImport imports
+                                                                          , "moduleName" .= P.runModuleName moduleName]]
   toJSON (ModuleList modules) = encodeSuccess modules
-  toJSON (RebuildSuccess modules) = encodeSuccess modules
+  toJSON (RebuildSuccess warnings) = encodeSuccess (P.toJSONErrors False P.Warning warnings)
+
+encodeImport :: (P.ModuleName, P.ImportDeclarationType, Maybe P.ModuleName) -> Value
+encodeImport (P.runModuleName -> mn, importType, map P.runModuleName -> qualifier) = case importType of
+  P.Implicit ->
+    object $ [ "module" .= mn
+             , "importType" .= ("implicit" :: Text)
+             ] ++ map (\x -> "qualifier" .= x) (maybeToList qualifier)
+  P.Explicit refs ->
+    object $ [ "module" .= mn
+             , "importType" .= ("explicit" :: Text)
+             , "identifiers" .= (identifierFromDeclarationRef <$> refs)
+             ] ++ map (\x -> "qualifier" .= x) (maybeToList qualifier)
+  P.Hiding refs ->
+    object $ [ "module" .= mn
+             , "importType" .= ("hiding" :: Text)
+             , "identifiers" .= (identifierFromDeclarationRef <$> refs)
+             ] ++ map (\x -> "qualifier" .= x) (maybeToList qualifier)
 
 newtype PursuitQuery = PursuitQuery Text
                      deriving (Show, Eq)

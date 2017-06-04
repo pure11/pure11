@@ -3,7 +3,7 @@
 --
 -- This module takes as input the individual generated modules from 'Language.PureScript.Make' and
 -- performs dead code elimination, filters empty modules,
--- and generates the final Javascript bundle.
+-- and generates the final JavaScript bundle.
 module Language.PureScript.Bundle
   ( bundle
   , bundleSM
@@ -17,6 +17,7 @@ module Language.PureScript.Bundle
   ) where
 
 import Prelude.Compat
+import Protolude (ordNub)
 
 import Control.Monad
 import Control.Monad.Error.Class
@@ -25,7 +26,7 @@ import Control.Arrow ((&&&))
 import Data.Char (chr, digitToInt)
 import Data.Generics (everything, everywhere, mkQ, mkT)
 import Data.Graph
-import Data.List (nub, stripPrefix)
+import Data.List (stripPrefix)
 import Data.Maybe (mapMaybe, catMaybes)
 import Data.Version (showVersion)
 import qualified Data.Set as S
@@ -113,8 +114,8 @@ printErrorMessage :: ErrorMessage -> [String]
 printErrorMessage (UnsupportedModulePath s) =
   [ "A CommonJS module has an unsupported name (" ++ show s ++ ")."
   , "The following file names are supported:"
-  , "  1) index.js (psc native modules)"
-  , "  2) foreign.js (psc foreign modules)"
+  , "  1) index.js (PureScript native modules)"
+  , "  2) foreign.js (PureScript foreign modules)"
   ]
 printErrorMessage InvalidTopLevel =
   [ "Expected a list of source elements at the top level." ]
@@ -184,10 +185,10 @@ withDeps (Module modulePath fn es) = Module modulePath fn (map expandDeps es)
 
   -- | Calculate dependencies and add them to the current element.
   expandDeps :: ModuleElement -> ModuleElement
-  expandDeps (Member n f nm decl _) = Member n f nm decl (nub $ dependencies modulePath decl)
+  expandDeps (Member n f nm decl _) = Member n f nm decl (ordNub $ dependencies modulePath decl)
   expandDeps (ExportsList exps) = ExportsList (map expand exps)
       where
-      expand (ty, nm, n1, _) = (ty, nm, n1, nub (dependencies modulePath n1))
+      expand (ty, nm, n1, _) = (ty, nm, n1, ordNub (dependencies modulePath n1))
   expandDeps other = other
 
   dependencies :: ModuleIdentifier -> JSExpression -> [(ModuleIdentifier, String)]
@@ -249,7 +250,7 @@ trailingCommaList :: JSCommaTrailingList a -> [a]
 trailingCommaList (JSCTLComma l _) = commaList l
 trailingCommaList (JSCTLNone l) = commaList l
 
--- | Attempt to create a Module from a Javascript AST.
+-- | Attempt to create a Module from a JavaScript AST.
 --
 -- Each type of module element is matched using pattern guards, and everything else is bundled into the
 -- Other constructor.
@@ -671,7 +672,7 @@ codeGen optionsMainModule optionsNamespace ms outFileOpt = (fmap sourceMapping o
 
 -- | The bundling function.
 -- This function performs dead code elimination, filters empty modules
--- and generates and prints the final Javascript bundle.
+-- and generates and prints the final JavaScript bundle.
 bundleSM :: (MonadError ErrorMessage m)
        => [(ModuleIdentifier, Maybe FilePath, String)] -- ^ The input modules.  Each module should be javascript rendered from 'Language.PureScript.Make' or @psc@.
        -> [ModuleIdentifier] -- ^ Entry points.  These module identifiers are used as the roots for dead-code elimination
@@ -700,7 +701,7 @@ bundleSM inputStrs entryPoints mainModule namespace outFilename = do
 
 -- | The bundling function.
 -- This function performs dead code elimination, filters empty modules
--- and generates and prints the final Javascript bundle.
+-- and generates and prints the final JavaScript bundle.
 bundle :: (MonadError ErrorMessage m)
        => [(ModuleIdentifier, String)] -- ^ The input modules.  Each module should be javascript rendered from 'Language.PureScript.Make' or @psc@.
        -> [ModuleIdentifier] -- ^ Entry points.  These module identifiers are used as the roots for dead-code elimination

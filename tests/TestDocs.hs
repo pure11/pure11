@@ -42,7 +42,7 @@ publishOpts = Publish.defaultPublishOptions
 
 main :: IO ()
 main = pushd "examples/docs" $ do
-  res <- Publish.preparePackage publishOpts
+  res <- Publish.preparePackage "bower.json" "resolutions.json" publishOpts
   case res of
     Left e -> Publish.printErrorToStdout e >> exitFailure
     Right pkg@Docs.Package{..} ->
@@ -276,12 +276,10 @@ runAssertion assertion linksCtx Docs.Module{..} =
 
 checkConstrained :: P.Type -> Text -> Bool
 checkConstrained ty tyClass =
-  -- Note that we don't recurse on ConstrainedType if none of the constraints
-  -- match; this is by design, as constraints should be moved to the front
-  -- anyway.
   case ty of
-    P.ConstrainedType cs _ | any (matches tyClass) cs ->
-      True
+    P.ConstrainedType c ty'
+      | matches tyClass c -> True
+      | otherwise -> checkConstrained ty' tyClass
     P.ForAll _ ty' _ ->
       checkConstrained ty' tyClass
     _ ->
@@ -385,8 +383,8 @@ testCases =
   , ("ConstrainedArgument",
       [ TypeSynonymShouldRenderAs (n "ConstrainedArgument") "WithoutArgs" "forall a. (Partial => a) -> a"
       , TypeSynonymShouldRenderAs (n "ConstrainedArgument") "WithArgs" "forall a. (Foo a => a) -> a"
-      , TypeSynonymShouldRenderAs (n "ConstrainedArgument") "MultiWithoutArgs" "forall a. ((Partial, Partial) => a) -> a"
-      , TypeSynonymShouldRenderAs (n "ConstrainedArgument") "MultiWithArgs" "forall a b. ((Foo a, Foo b) => a) -> a"
+      , TypeSynonymShouldRenderAs (n "ConstrainedArgument") "MultiWithoutArgs" "forall a. (Partial => Partial => a) -> a"
+      , TypeSynonymShouldRenderAs (n "ConstrainedArgument") "MultiWithArgs" "forall a b. (Foo a => Foo b => a) -> a"
       ])
 
   , ("TypeOpAliases",
@@ -399,6 +397,10 @@ testCases =
 
   , ("DocComments",
       [ ShouldHaveDocComment (n "DocComments") "example" "    example == 0"
+      ])
+
+  , ("TypeLevelString",
+      [ ShouldBeDocumented (n "TypeLevelString") "Foo" ["fooBar"]
       ])
   ]
 

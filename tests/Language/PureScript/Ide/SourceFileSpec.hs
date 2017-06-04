@@ -18,7 +18,7 @@ span2 = P.SourceSpan "" (P.SourcePos 2 2) (P.SourcePos 3 3)
 
 typeAnnotation1, value1, synonym1, class1, class2, data1, data2, valueFixity, typeFixity, foreign1, foreign2, foreign3, member1 :: P.Declaration
 typeAnnotation1 = P.TypeDeclaration (P.Ident "value1") P.REmpty
-value1 = P.ValueDeclaration (P.Ident "value1") P.Public [] (Left [])
+value1 = P.ValueDeclaration (P.Ident "value1") P.Public [] []
 synonym1 = P.TypeSynonymDeclaration (P.ProperName "Synonym1") [] P.REmpty
 class1 = P.TypeClassDeclaration (P.ProperName "Class1") [] [] [] []
 class2 = P.TypeClassDeclaration (P.ProperName "Class2") [] [] []
@@ -97,12 +97,12 @@ getLocation s = do
     ideState = emptyIdeState `s3`
       [ ("Test",
          [ ideValue "sfValue" Nothing `annLoc` valueSS
-         , ideSynonym "SFType" P.tyString `annLoc` synonymSS
+         , ideSynonym "SFType" P.tyString P.kindType `annLoc` synonymSS
          , ideType "SFData" Nothing `annLoc` typeSS
          , ideDtor "SFOne" "SFData" Nothing `annLoc` typeSS
          , ideDtor "SFTwo" "SFData" Nothing `annLoc` typeSS
          , ideDtor "SFThree" "SFData" Nothing `annLoc` typeSS
-         , ideTypeClass "SFClass" [] `annLoc` classSS
+         , ideTypeClass "SFClass" P.kindType [] `annLoc` classSS
          , ideValueOp "<$>" (P.Qualified Nothing (Left "")) 0 Nothing Nothing
            `annLoc` valueOpSS
          , ideTypeOp "~>" (P.Qualified Nothing "") 0 Nothing Nothing

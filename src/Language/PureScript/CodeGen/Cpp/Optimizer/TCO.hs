@@ -24,19 +24,14 @@ import Data.Monoid ((<>))
 import qualified Data.Monoid as Monoid
 import Data.Text (Text)
 
-import Language.PureScript.Options
 import Language.PureScript.CodeGen.Cpp.Types
 import Language.PureScript.CodeGen.Cpp.AST
 
 -- |
 -- Eliminate tail calls
 --
-tco :: Options -> Cpp -> Cpp
-tco opts | optionsNoTco opts = id
-         | otherwise = tco'
-
-tco' :: Cpp -> Cpp
-tco' = everywhereOnCpp convert
+tco :: Cpp -> Cpp
+tco = everywhereOnCpp convert
   where
   tcoVar :: Text -> Text
   tcoVar arg = "tco$" <> arg

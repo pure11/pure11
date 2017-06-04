@@ -55,7 +55,7 @@ data HtmlRenderContext = HtmlRenderContext
   { currentModuleName :: P.ModuleName
   , buildDocLink :: Namespace -> Text -> ContainingModule -> Maybe DocLink
   , renderDocLink :: DocLink -> Text
-  , renderSourceLink :: P.SourceSpan -> Text
+  , renderSourceLink :: P.SourceSpan -> Maybe Text
   }
 
 -- |
@@ -65,7 +65,7 @@ nullRenderContext mn = HtmlRenderContext
   { currentModuleName = mn
   , buildDocLink = const (const (const Nothing))
   , renderDocLink = const ""
-  , renderSourceLink = const ""
+  , renderSourceLink = const Nothing
   }
 
 packageAsHtml :: (P.ModuleName -> HtmlRenderContext) -> Package a -> HtmlOutput Html
@@ -126,7 +126,7 @@ declAsHtml r d@Declaration{..} = do
   H.div ! A.class_ "decl" ! A.id (v (T.drop 1 declFragment)) $ do
     h3 ! A.class_ "decl__title clearfix" $ do
       a ! A.class_ "decl__anchor" ! A.href (v declFragment) $ "#"
-      text declTitle
+      H.span $ text declTitle
       for_ declSourceSpan (linkToSource r)
 
     H.div ! A.class_ "decl__body" $ do
@@ -155,8 +155,11 @@ declAsHtml r d@Declaration{..} = do
   where
     linkToSource :: HtmlRenderContext -> P.SourceSpan -> Html
     linkToSource ctx srcspan =
-      H.span ! A.class_ "decl__source" $
-        a ! A.href (v (renderSourceLink ctx srcspan)) $ text "Source"
+      maybe (return ()) go (renderSourceLink ctx srcspan)
+      where
+      go href =
+        H.span ! A.class_ "decl__source" $
+          a ! A.href (v href) $ text "Source"
 
 renderChildren :: HtmlRenderContext -> [ChildDeclaration] -> Html
 renderChildren _ [] = return ()

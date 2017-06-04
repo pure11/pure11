@@ -7,6 +7,7 @@ module Language.PureScript.Errors
   ) where
 
 import           Prelude.Compat
+import           Protolude (ordNub)
 
 import           Control.Arrow ((&&&))
 import           Control.Monad
@@ -14,13 +15,11 @@ import           Control.Monad.Error.Class (MonadError(..))
 import           Control.Monad.Trans.State.Lazy
 import           Control.Monad.Writer
 import           Data.Char (isSpace)
-import           Data.Either (lefts, rights)
+import           Data.Either (partitionEithers)
 import           Data.Foldable (fold)
 import           Data.Functor.Identity (Identity(..))
-import           Data.List (transpose, nub, nubBy, sortBy, partition)
+import           Data.List (transpose, nubBy, sort, partition, dropWhileEnd)
 import           Data.Maybe (maybeToList, fromMaybe, mapMaybe)
-import           Data.Ord (comparing)
-import           Data.String (fromString)
 import qualified Data.Map as M
 import qualified Data.Text as T
 import           Data.Text (Text)
@@ -33,7 +32,7 @@ import           Language.PureScript.Label (Label(..))
 import           Language.PureScript.Names
 import           Language.PureScript.Pretty
 import           Language.PureScript.Pretty.Common (endWith)
-import           Language.PureScript.PSString (PSString, decodeStringWithReplacement)
+import           Language.PureScript.PSString (decodeStringWithReplacement)
 import           Language.PureScript.Traversals
 import           Language.PureScript.Types
 import qualified Language.PureScript.Publish.BoxesHelpers as BoxHelpers
@@ -122,6 +121,8 @@ errorCode em = case unwrapErrorMessage em of
   PossiblyInfiniteInstance{} -> "PossiblyInfiniteInstance"
   CannotDerive{} -> "CannotDerive"
   InvalidNewtypeInstance{} -> "InvalidNewtypeInstance"
+  InvalidDerivedInstance{} -> "InvalidDerivedInstance"
+  ExpectedTypeConstructor{} -> "ExpectedTypeConstructor"
   CannotFindDerivingType{} -> "CannotFindDerivingType"
   DuplicateLabel{} -> "DuplicateLabel"
   DuplicateValueDeclaration{} -> "DuplicateValueDeclaration"
@@ -171,6 +172,7 @@ errorCode em = case unwrapErrorMessage em of
   CannotUseBindWithDo{} -> "CannotUseBindWithDo"
   ClassInstanceArityMismatch{} -> "ClassInstanceArityMismatch"
   UserDefinedWarning{} -> "UserDefinedWarning"
+  UnusableDeclaration{} -> "UnusableDeclaration"
 
 -- | A stack trace for an error
 newtype MultipleErrors = MultipleErrors
@@ -260,10 +262,12 @@ onTypesInErrorMessageM f (ErrorMessage hints simple) = ErrorMessage <$> traverse
   gSimple (PossiblyInfiniteInstance cl ts) = PossiblyInfiniteInstance cl <$> traverse f ts
   gSimple (CannotDerive cl ts) = CannotDerive cl <$> traverse f ts
   gSimple (InvalidNewtypeInstance cl ts) = InvalidNewtypeInstance cl <$> traverse f ts
+  gSimple (InvalidDerivedInstance cl ts n) = InvalidDerivedInstance cl <$> traverse f ts <*> pure n
+  gSimple (ExpectedTypeConstructor cl ts ty) = ExpectedTypeConstructor cl <$> traverse f ts <*> f ty
   gSimple (ExpectedType ty k) = ExpectedType <$> f ty <*> pure k
   gSimple (OrphanInstance nm cl ts) = OrphanInstance nm cl <$> traverse f ts
   gSimple (WildcardInferredType ty ctx) = WildcardInferredType <$> f ty <*> traverse (sndM f) ctx
-  gSimple (HoleInferredType name ty ctx env) = HoleInferredType name <$> f ty <*> traverse (sndM f) ctx  <*> gTypeSearch env
+  gSimple (HoleInferredType name ty ctx env) = HoleInferredType name <$> f ty <*> traverse (sndM f) ctx  <*> onTypeSearchTypesM f env
   gSimple (MissingTypeDeclaration nm ty) = MissingTypeDeclaration nm <$> f ty
   gSimple (CannotGeneralizeRecursiveFunction nm ty) = CannotGeneralizeRecursiveFunction nm <$> f ty
   gSimple other = pure other
@@ -276,9 +280,6 @@ onTypesInErrorMessageM f (ErrorMessage hints simple) = ErrorMessage <$> traverse
   gHint (ErrorInInstance cl ts) = ErrorInInstance cl <$> traverse f ts
   gHint (ErrorSolvingConstraint con) = ErrorSolvingConstraint <$> overConstraintArgs (traverse f) con
   gHint other = pure other
-
-  gTypeSearch (TSBefore env) = pure (TSBefore env)
-  gTypeSearch (TSAfter result) = TSAfter <$> traverse (traverse f) result
 
 errorDocUri :: ErrorMessage -> Text
 errorDocUri e = "https://github.com/purescript/documentation/blob/master/errors/" <> errorCode e <> ".md"
@@ -490,8 +491,8 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
       line $ "The type declaration for " <> markCode (showIdent nm) <> " should be followed by its definition."
     renderSimpleErrorMessage (RedefinedIdent name) =
       line $ "The value " <> markCode (showIdent name) <> " has been defined multiple times"
-    renderSimpleErrorMessage (UnknownName name@(Qualified Nothing (IdentName (Ident "bind")))) =
-      line $ "Unknown " <> printName name <> ". You're probably using do-notation, which the compiler replaces with calls to the " <> markCode "bind" <> " function. Please import " <> markCode "bind" <> " from module " <> markCode "Prelude"
+    renderSimpleErrorMessage (UnknownName name@(Qualified Nothing (IdentName (Ident i)))) | i `elem` [ C.bind, C.discard ] =
+      line $ "Unknown " <> printName name <> ". You're probably using do-notation, which the compiler replaces with calls to the " <> markCode i <> " function. Please import " <> markCode i <> " from module " <> markCode "Prelude"
     renderSimpleErrorMessage (UnknownName name) =
       line $ "Unknown " <> printName name
     renderSimpleErrorMessage (UnknownImport mn name) =
@@ -544,11 +545,16 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
       paras [ line $ "Type synonym " <> markCode (showQualified runProperName name) <> " is partially applied."
             , line "Type synonyms must be applied to all of their type arguments."
             ]
-    renderSimpleErrorMessage (EscapedSkolem binding) =
-      paras $ [ line "A type variable has escaped its scope." ]
-                     <> foldMap (\expr -> [ line "Relevant expression: "
-                                          , markCodeBox $ indent $ prettyPrintValue valueDepth expr
-                                          ]) binding
+    renderSimpleErrorMessage (EscapedSkolem name Nothing ty) =
+      paras [ line $ "The type variable " <> markCode name <> " has escaped its scope, appearing in the type"
+            , markCodeBox $ indent $ typeAsBox ty
+            ]
+    renderSimpleErrorMessage (EscapedSkolem name (Just srcSpan) ty) =
+      paras [ line $ "The type variable " <> markCode name <> ", bound at"
+            , indent $ line $ displaySourceSpan srcSpan
+            , line "has escaped its scope, appearing in the type"
+            , markCodeBox $ indent $ typeAsBox ty
+            ]
     renderSimpleErrorMessage (TypesDoNotUnify u1 u2)
       = let (sorted1, sorted2) = sortRows u1 u2
 
@@ -559,15 +565,11 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
             -- Put the common labels last
             sortRows' :: ([(Label, Type)], Type) -> ([(Label, Type)], Type) -> (Type, Type)
             sortRows' (s1, r1) (s2, r2) =
-              let common :: [(Label, (Type, Type))]
-                  common = sortBy (comparing fst) [ (name, (t1, t2)) | (name, t1) <- s1, (name', t2) <- s2, name == name' ]
-
-                  sd1, sd2 :: [(Label, Type)]
-                  sd1 = [ (name, t1) | (name, t1) <- s1, name `notElem` map fst s2 ]
-                  sd2 = [ (name, t2) | (name, t2) <- s2, name `notElem` map fst s1 ]
-              in ( rowFromList (sortBy (comparing fst) sd1 ++ map (fst &&& fst . snd) common, r1)
-                 , rowFromList (sortBy (comparing fst) sd2 ++ map (fst &&& snd . snd) common, r2)
-                 )
+                  let (common1, unique1) = partition (flip elem s2) s1
+                      (common2, unique2) = partition (flip elem s1) s2
+                  in ( rowFromList (sort unique1 ++ sort common1, r1)
+                     , rowFromList (sort unique2 ++ sort common2, r2)
+                     )
         in paras [ line "Could not match type"
                  , markCodeBox $ indent $ typeAsBox sorted1
                  , line "with type"
@@ -611,12 +613,18 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
                                                           _
                                                           (Just (PartialConstraintData bs b)))) =
       paras [ line "A case expression could not be determined to cover all inputs."
-            , line "The following additional cases are required to cover all inputs:\n"
+            , line "The following additional cases are required to cover all inputs:"
             , indent $ paras $
                 Box.hsep 1 Box.left
                   (map (paras . map (line . markCode)) (transpose bs))
                   : [line "..." | not b]
             , line "Alternatively, add a Partial constraint to the type of the enclosing value."
+            ]
+    renderSimpleErrorMessage (NoInstanceFound (Constraint C.Discard [ty] _)) =
+      paras [ line "A result of type"
+            , markCodeBox $ indent $ typeAsBox ty
+            , line "was implicitly discarded in a do notation block."
+            , line ("You can use " <> markCode "_ <- ..." <> " to explicitly discard the result.")
             ]
     renderSimpleErrorMessage (NoInstanceFound (Constraint nm ts _)) =
       paras [ line "No type class instance was found for"
@@ -653,6 +661,7 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
                 [ line (showQualified runProperName nm)
                 , Box.vcat Box.left (map typeAtomAsBox ts)
                 ]
+            , line "since instances of this type class are not derivable."
             ]
     renderSimpleErrorMessage (InvalidNewtypeInstance nm ts) =
       paras [ line "Cannot derive newtype instance for"
@@ -661,6 +670,32 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
                 , Box.vcat Box.left (map typeAtomAsBox ts)
                 ]
             , line "Make sure this is a newtype."
+            ]
+    renderSimpleErrorMessage (InvalidDerivedInstance nm ts argCount) =
+      paras [ line "Cannot derive the type class instance"
+            , markCodeBox $ indent $ Box.hsep 1 Box.left
+                [ line (showQualified runProperName nm)
+                , Box.vcat Box.left (map typeAtomAsBox ts)
+                ]
+            , line $ fold $
+                [ "because the "
+                , markCode (showQualified runProperName nm)
+                , " type class has "
+                , T.pack (show argCount)
+                , " type "
+                , if argCount == 1 then "argument" else "arguments"
+                , ", but the declaration specifies " <> T.pack (show (length ts)) <> "."
+                ]
+            ]
+    renderSimpleErrorMessage (ExpectedTypeConstructor nm ts ty) =
+      paras [ line "Cannot derive the type class instance"
+            , markCodeBox $ indent $ Box.hsep 1 Box.left
+                [ line (showQualified runProperName nm)
+                , Box.vcat Box.left (map typeAtomAsBox ts)
+                ]
+            , "because the type"
+            , markCodeBox $ indent $ typeAsBox ty
+            , line "is not of the required form T a_1 ... a_n, where T is a type constructor defined in the same module."
             ]
     renderSimpleErrorMessage (CannotFindDerivingType nm) =
       line $ "Cannot derive a type class instance, because the type declaration for " <> markCode (runProperName nm) <> " could not be found."
@@ -735,7 +770,7 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
     renderSimpleErrorMessage (ShadowedTypeVar tv) =
       line $ "Type variable " <> markCode tv <> " was shadowed."
     renderSimpleErrorMessage (UnusedTypeVar tv) =
-      line $ "Type variable " <> markCode tv <> " was declared but not used."
+      line $ "Type variable " <> markCode tv <> " is ambiguous, since it is unused in the polymorphic type which introduces it."
     renderSimpleErrorMessage (MisleadingEmptyTypeImport mn name) =
       line $ "Importing type " <> markCode (runProperName name <> "(..)") <> " from " <> markCode (runModuleName mn) <> " is misleading as it has no exported data constructors."
     renderSimpleErrorMessage (ImportHidingModule name) =
@@ -750,11 +785,11 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
       let
         maxTSResults = 15
         tsResult = case ts of
-          (TSAfter idents) | not (null idents) ->
+          (TSAfter{tsAfterIdentifiers=idents}) | not (null idents) ->
             let
               formatTS (names, types) =
                 let
-                  idBoxes = Box.text . T.unpack . showQualified runIdent <$> names
+                  idBoxes = Box.text . T.unpack . showQualified id <$> names
                   tyBoxes = (\t -> BoxHelpers.indented
                               (Box.text ":: " Box.<> typeAsBox t)) <$> types
                   longestId = maximum (map Box.cols idBoxes)
@@ -869,21 +904,28 @@ prettyPrintSingleError (PPEOptions codeColor full level showDocs) e = flip evalS
       paras [ line $ "Expected a type wildcard (_) when deriving an instance for " <> markCode (runProperName tyName) <> "."
             ]
 
-    renderSimpleErrorMessage CannotUseBindWithDo =
-      paras [ line $ "The name " <> markCode "bind" <> " cannot be brought into scope in a do notation block, since do notation uses the same name."
+    renderSimpleErrorMessage (CannotUseBindWithDo name) =
+      paras [ line $ "The name " <> markCode (showIdent name) <> " cannot be brought into scope in a do notation block, since do notation uses the same name."
             ]
 
     renderSimpleErrorMessage (ClassInstanceArityMismatch dictName className expected actual) =
       paras [ line $ "The type class " <> markCode (showQualified runProperName className) <>
-                     " expects " <> T.pack (show expected) <> " argument(s)."
-            , line $ "But the instance " <> markCode (showIdent dictName) <> " only provided " <>
-                     T.pack (show actual) <> "."
+                     " expects " <> T.pack (show expected) <> " " <> argsMsg <> "."
+            , line $ "But the instance " <> markCode (showIdent dictName) <> mismatchMsg <> T.pack (show actual) <> "."
             ]
+        where
+          mismatchMsg = if actual > expected then " provided " else " only provided "
+          argsMsg = if expected > 1 then "arguments" else "argument"
 
     renderSimpleErrorMessage (UserDefinedWarning msgTy) =
       let msg = fromMaybe (typeAsBox msgTy) (toTypelevelString msgTy) in
       paras [ line "A custom warning occurred while solving type class constraints:"
             , indent msg
+            ]
+
+    renderSimpleErrorMessage (UnusableDeclaration ident) =
+      paras [ line $ "The declaration " <> markCode (showIdent ident) <> " is unusable."
+            , line $ "This happens when a constraint couldn't possibly have enough information to work out which instance is required."
             ]
 
     renderHint :: ErrorMessageHint -> Box.Box -> Box.Box
@@ -1242,7 +1284,7 @@ prettyPrintParseErrorMessages msgOr msgUnknown msgExpecting msgUnExpected msgEnd
   separate   _ [m]    = m
   separate sep (m:ms) = m ++ sep ++ separate sep ms
 
-  clean             = nub . filter (not . null)
+  clean             = ordNub . filter (not . null)
 
 -- | Indent to the right, and pad on top and bottom.
 indent :: Box.Box -> Box.Box
@@ -1262,23 +1304,21 @@ renderBox = unlines
             . lines
             . Box.render
   where
-  dropWhileEnd p = reverse . dropWhile p . reverse
   whiteSpace = all isSpace
 
 toTypelevelString :: Type -> Maybe Box.Box
-toTypelevelString t = (Box.text . decodeStringWithReplacement) <$> toTypelevelString' t
-  where
-  toTypelevelString' :: Type -> Maybe PSString
-  toTypelevelString' (TypeLevelString s) = Just s
-  toTypelevelString' (TypeApp (TypeConstructor f) x)
-    | f == primName "TypeString" = Just $ fromString $ prettyPrintType x
-  toTypelevelString' (TypeApp (TypeApp (TypeConstructor f) x) ret)
-    | f == primName "TypeConcat" = toTypelevelString' x <> toTypelevelString' ret
-  toTypelevelString' _ = Nothing
+toTypelevelString (TypeLevelString s) =
+  Just . Box.text $ decodeStringWithReplacement s
+toTypelevelString (TypeApp (TypeConstructor f) x)
+  | f == primName "TypeString" = Just (typeAsBox x)
+toTypelevelString (TypeApp (TypeApp (TypeConstructor f) x) ret)
+  | f == primName "TypeConcat" =
+    (Box.<>) <$> toTypelevelString x <*> toTypelevelString ret
+toTypelevelString _ = Nothing
 
 -- | Rethrow an error with a more detailed error message in the case of failure
 rethrow :: (MonadError e m) => (e -> e) -> m a -> m a
-rethrow f = flip catchError $ \e -> throwError (f e)
+rethrow f = flip catchError (throwError . f)
 
 reifyErrors :: (MonadError e m) => m a -> m (Either e a)
 reifyErrors ma = catchError (fmap Right ma) (return . Left)
@@ -1330,6 +1370,6 @@ parU xs f =
     withError u = catchError (Right <$> u) (return . Left)
 
     collectErrors :: [Either MultipleErrors b] -> m [b]
-    collectErrors es = case lefts es of
-      [] -> return $ rights es
-      errs -> throwError $ fold errs
+    collectErrors es = case partitionEithers es of
+      ([], rs) -> return rs
+      (errs, _) -> throwError $ fold errs

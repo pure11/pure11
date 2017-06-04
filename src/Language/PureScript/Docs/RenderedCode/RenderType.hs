@@ -26,6 +26,7 @@ import Language.PureScript.Names
 import Language.PureScript.Pretty.Types
 import Language.PureScript.Types
 import Language.PureScript.Label (Label)
+import Language.PureScript.PSString (prettyPrintString)
 
 import Language.PureScript.Docs.RenderedCode.Types
 import Language.PureScript.Docs.Utils.MonoidExtras
@@ -54,6 +55,8 @@ typeLiterals = mkPattern match
     Just $ renderTypeAtom l <> sp <> renderTypeAtom op <> sp <> renderTypeAtom r
   match (TypeOp n) =
     Just (typeOp n)
+  match (TypeLevelString str) =
+    Just (syntax (prettyPrintString str))
   match _ =
     Nothing
 
@@ -62,17 +65,13 @@ renderConstraint (Constraint pn tys _) =
   let instApp = foldl TypeApp (TypeConstructor (fmap coerceProperName pn)) tys
   in  renderType instApp
 
-renderConstraints :: [Constraint] -> RenderedCode -> RenderedCode
-renderConstraints deps ty =
+renderConstraints :: Constraint -> RenderedCode -> RenderedCode
+renderConstraints con ty =
   mintersperse sp
-    [ if length deps == 1
-         then constraints
-         else syntax "(" <> constraints <> syntax ")"
+    [ renderConstraint con
     , syntax "=>"
     , ty
     ]
-  where
-    constraints = mintersperse (syntax "," <> sp) (map renderConstraint deps)
 
 -- |
 -- Render code representing a Row
@@ -115,10 +114,10 @@ kinded = mkPattern match
   match (KindedType t k) = Just (k, t)
   match _ = Nothing
 
-constrained :: Pattern () Type ([Constraint], Type)
+constrained :: Pattern () Type (Constraint, Type)
 constrained = mkPattern match
   where
-  match (ConstrainedType deps ty) = Just (deps, ty)
+  match (ConstrainedType con ty) = Just (con, ty)
   match _ = Nothing
 
 explicitParens :: Pattern () Type ((), Type)
