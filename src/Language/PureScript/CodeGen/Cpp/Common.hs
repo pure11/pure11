@@ -24,7 +24,6 @@ import Data.Char
 import Data.Text hiding (foldl1, map)
 import qualified Data.Text as T
 import Data.Monoid ((<>))
-import qualified Language.PureScript.Constants as C
 import Language.PureScript.Crash
 import Language.PureScript.Names
 import Language.PureScript.PSString (PSString, decodeStringEither)
@@ -49,7 +48,8 @@ safeName name
   | Just ('$', s) <- uncons name
   , all isDigit s = name
 safeName name
-  | C.__superclass_ `isPrefixOf` name
+--  | C.__superclass_ `isPrefixOf` name
+  | isUpper (T.head name)
   , any (=='.') name
   = "$" <> (escaped $ dotsTo '_' name)
 safeName name

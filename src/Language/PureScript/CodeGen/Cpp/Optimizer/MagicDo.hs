@@ -24,13 +24,8 @@ import Language.PureScript.CodeGen.Cpp.AST
 import Language.PureScript.CodeGen.Cpp.Common
 import Language.PureScript.CodeGen.Cpp.Optimizer.Common
 import Language.PureScript.CodeGen.Cpp.Types
-import Language.PureScript.Options
 import qualified Language.PureScript.Constants as C
 -- import Language.PureScript.PSString (mkString)
-
-magicDo :: Options -> Cpp -> Cpp
-magicDo opts | optionsNoMagicDo opts = id
-             | otherwise = {- inlineST . -} magicDo' -- TODO: fix and test with Collatz.purs
 
 -- |
 -- Inline type class dictionaries for >>= and return for the Eff monad
@@ -48,8 +43,8 @@ magicDo opts | optionsNoMagicDo opts = id
 --    ...
 --  }
 --
-magicDo' :: Cpp -> Cpp
-magicDo' = everywhereOnCpp undo . everywhereOnCppTopDown convert
+magicDo :: Cpp -> Cpp
+magicDo = {- inlineST . -} everywhereOnCpp undo . everywhereOnCppTopDown convert -- TODO: fix and test with Collatz.purs
   where
   -- The name of the function block which is added to denote a do block
   fnName = "__do"

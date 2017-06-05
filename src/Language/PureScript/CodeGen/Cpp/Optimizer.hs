@@ -40,12 +40,8 @@ module Language.PureScript.CodeGen.Cpp.Optimizer (
 
 import Prelude.Compat
 
-import Control.Monad.Reader (MonadReader, ask, asks)
 import Control.Monad.Supply.Class (MonadSupply)
-
 import Language.PureScript.CodeGen.Cpp.AST
-import Language.PureScript.Options
-
 import Language.PureScript.CodeGen.Cpp.Optimizer.Blocks
 import Language.PureScript.CodeGen.Cpp.Optimizer.Common
 import Language.PureScript.CodeGen.Cpp.Optimizer.Inliner
@@ -57,14 +53,8 @@ import Language.PureScript.CodeGen.Cpp.Optimizer.Unused
 -- |
 -- Apply a series of optimizer passes to simplified C++11 code
 --
-optimize :: (MonadReader Options m, MonadSupply m) => NamesMap -> Cpp -> m Cpp
+optimize :: MonadSupply m => NamesMap -> Cpp -> m Cpp
 optimize nm cpp = do
-  noOpt <- asks optionsNoOptimizations
-  if noOpt then return cpp else optimize' nm cpp
-
-optimize' :: (MonadReader Options m, MonadSupply m) => NamesMap -> Cpp -> m Cpp
-optimize' nm cpp = do
-  opts <- ask
   cpp' <- untilFixedPoint (inlineFnComposition .
                            inlineUnsafePartial .
                            tidyUp .
@@ -72,7 +62,7 @@ optimize' nm cpp = do
     [ inlineCommonValues
     , inlineCommonOperators
     ]) cpp
-  untilFixedPoint (return . removeCurrying nm) . toAutoVars . tidyUp . tco opts . magicDo opts $ cpp'
+  untilFixedPoint (return . removeCurrying nm) . toAutoVars . tidyUp . tco . magicDo $ cpp'
   where
   tidyUp :: Cpp -> Cpp
   tidyUp = applyAll

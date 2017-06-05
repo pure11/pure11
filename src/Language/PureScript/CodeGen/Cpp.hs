@@ -28,7 +28,7 @@ module Language.PureScript.CodeGen.Cpp
   ) where
 
 import Prelude.Compat
-import Data.Char (isLetter)
+import Data.Char (isLetter, isUpper)
 import Data.Function (on)
 import Data.List
 import qualified Data.Map as M
@@ -139,7 +139,8 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
   declToCpp _ (_, ident) e@(Abs (_, _, _, Just IsTypeClassConstructor) _ _) =
     let className = identToCpp ident
         (supers, members) =
-           span (safeName C.__superclass_ `Text.isPrefixOf`) (identToCpp <$> (fst $ unAbs e []))
+           span (isUpper . Text.head) (identToCpp <$> (fst $ unAbs e []))
+           -- span (safeName C.__superclass_ `Text.isPrefixOf`) (identToCpp <$> (fst $ unAbs e []))
     in return $ CppStruct className [CppEnum Nothing Nothing (sort supers <> members)]
   declToCpp vqs (_, ident) (Abs (_, com, ty, _) arg body) = do
     fn <-
@@ -375,7 +376,8 @@ moduleToCpp otherOpts env (Module _ mn imps _ foreigns decls) = do
     | ann1 == nullAnn && ann2 == nullAnn
     = CppDictGet <$> pure (CppSymbol prop) <*> valueToCpp val
   valueToCpp (Accessor _ prop val)
-    | C.__superclass_ `isPrefixOf` codePoints prop
+    -- | C.__superclass_ `isPrefixOf` codePoints prop
+    | isUpper . head $ codePoints prop
     = CppDictGet <$> pure (CppSymbol prop) <*> valueToCpp val
   valueToCpp (Accessor _ prop val) = CppRecordGet <$> pure prop <*> valueToCpp val
   valueToCpp (ObjectUpdate _ o ps) = do
@@ -722,7 +724,7 @@ arity = go 0
   go arity' (T.ForAll _ t _) = go arity' t
   go arity' (T.TypeApp (T.TypeApp fn _) t)
     | fn == E.tyFunction = go (arity' + 1) t
-  go arity' (T.ConstrainedType ts t) = go (arity' + length ts) t
+  go arity' (T.ConstrainedType _ t) = go (arity' + 1) t
   go arity' _ = arity'
 
 ---------------------------------------------------------------------------------------------------
@@ -733,7 +735,7 @@ extractConstraints = go []
   go cs (T.ForAll _ t _) = go cs t
   go cs (T.TypeApp (T.TypeApp fn _) t)
     | fn == E.tyFunction = go cs t
-  go cs (T.ConstrainedType ts t) = go (cs ++ ts) t
+  go cs (T.ConstrainedType c t) = go (cs ++ [c]) t
   go cs _ = cs
 
 ---------------------------------------------------------------------------------------------------

@@ -131,6 +131,27 @@ executables:
       else:
         dependencies:
         - gitrev >=1.2.0 && <1.3
+  pcc:
+    main: Main.hs
+    source-dirs: pcc
+    ghc-options: -Wall -O2 -fno-warn-unused-do-bind -threaded -rtsopts -with-rtsopts=-N
+    dependencies:
+      - ansi-wl-pprint
+      - file-embed
+      - network
+      - optparse-applicative >=0.13.0
+      - purescript
+      - wai ==3.*
+      - wai-websockets ==3.*
+      - warp ==3.*
+      - websockets >=0.9 && <0.11
+    when:
+    - condition: flag(release)
+      then:
+        cpp-options: -DRELEASE
+      else:
+        dependencies:
+        - gitrev >=1.2.0 && <1.3
 
 tests:
   tests:
@@ -143,7 +164,16 @@ tests:
     - hspec-discover
     - HUnit
     - silently
-
+  pcc-tests:
+    main: TestMain.hs
+    source-dirs: pcc
+    ghc-options: -Wall
+    dependencies:
+    - purescript
+    - hspec
+    - hspec-discover
+    - HUnit
+    - silently
 flags:
   release:
     description: >

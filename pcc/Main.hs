@@ -174,16 +174,6 @@ outputDirectory = strOption $
   <> showDefault
   <> help "The output directory"
 
-noTco :: Parser Bool
-noTco = switch $
-     long "no-tco"
-  <> help "Disable tail call optimizations"
-
-noMagicDo :: Parser Bool
-noMagicDo = switch $
-     long "no-magic-do"
-  <> help "Disable the optimization that overloads the do keyword to generate efficient code specifically for the Eff monad"
-
 noOpts :: Parser Bool
 noOpts = switch $
      long "no-opts"
@@ -237,12 +227,8 @@ ucns = switch $
      long "use-ucns"
   <> help "Use UCNs for unicode identifiers (for compilers that do not fully support them, such as gcc)"
 
-options :: Parser P.Options
-options = P.Options <$> noTco
-                    <*> noMagicDo
-                    <*> pure Nothing
-                    <*> noOpts
-                    <*> verboseErrors
+options :: Opts.Parser P.Options
+options = P.Options <$> verboseErrors
                     <*> (not <$> comments)
                     <*> sourceMaps
                     <*> dumpCoreFn
